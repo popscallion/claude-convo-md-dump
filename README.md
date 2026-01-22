@@ -4,16 +4,32 @@ A lightweight tool to convert Claude Code JSONL transcripts into single-file Mar
 
 ## Usage
 
-Installation:
+### Interactive Mode (Recommended)
+
+Run without arguments to see a list of recent sessions:
 
 ```bash
-uv tool install .
+claude-md-dump
 ```
 
-Run:
+Select a session number, and the Markdown will be printed to stdout.
+
+**Tip:** Pipe to your clipboard or a file:
 
 ```bash
-claude-md-dump <input.jsonl> [output.md] [--thoughts | --verbose]
+# Copy to clipboard (Mac)
+claude-md-dump | pbcopy
+
+# Save to file
+claude-md-dump > transcript.md
+```
+
+### Direct File Mode
+
+Convert a specific file:
+
+```bash
+claude-md-dump path/to/session.jsonl [output.md]
 ```
 
 ## Modes
@@ -21,6 +37,12 @@ claude-md-dump <input.jsonl> [output.md] [--thoughts | --verbose]
 *   (Default) **Chat**: Clean text only. No tools or thinking blocks.
 *   `--thoughts`: **Logic Flow**. Includes thinking blocks and tool inputs, but suppresses file dump outputs. Best for reviewing the agent's decision-making.
 *   `--verbose`: **Full Record**. Includes everything.
+
+## Features
+
+*   **Smart Filtering:** Automatically hides "ghost" sessions (warmups or failed starts with no user prompts).
+*   **Clean Summaries:** Shows the first user prompt in the interactive list.
+*   **Stdio Friendly:** Interactive menu prints to stderr, so you can safely redirect stdout (Markdown) to files or pipes.
 
 ## Credits
 

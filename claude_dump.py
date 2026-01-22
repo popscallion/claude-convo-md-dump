@@ -256,7 +256,9 @@ def convert(filepath, output_file=None, mode="chat"):
             print(f"Successfully converted to {output_file} ({mode} mode)")
 
 def main():
-    desc = "Convert Claude Code JSONL to Markdown.\n\nModes:\n"
+    desc = "Convert Claude Code JSONL to Markdown.\n\n"
+    desc += "Run without arguments to select a recent session interactively.\n\n"
+    desc += "Modes:\n"
     for m, d in MODE_DESCRIPTIONS.items():
         desc += f"  {m:<10} {d}\n"
         
