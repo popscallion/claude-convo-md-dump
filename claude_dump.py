@@ -56,12 +56,12 @@ def select_session():
     sessions = find_recent_sessions()
     
     if not sessions:
-        print("No Claude sessions found in ~/.claude/projects")
+        print("No Claude sessions found in ~/.claude/projects", file=sys.stderr)
         sys.exit(1)
         
-    print("\nRecent Claude Sessions:")
-    print(f"{'#':<4} {'Date':<18} {'Size':<10} {'Filename'}")
-    print("-" * 60)
+    print("\nRecent Claude Sessions:", file=sys.stderr)
+    print(f"{'#':<4} {'Date':<18} {'Size':<10} {'Filename'}", file=sys.stderr)
+    print("-" * 60, file=sys.stderr)
     
     for i, s in enumerate(sessions):
         dt = datetime.fromtimestamp(s['mtime']).strftime('%Y-%m-%d %H:%M')
@@ -71,23 +71,32 @@ def select_session():
         if len(name) > 40:
              name = name[:37] + "..."
              
-        print(f"{i+1:<4} {dt:<18} {size_kb:<10} {name}")
+        print(f"{i+1:<4} {dt:<18} {size_kb:<10} {name}", file=sys.stderr)
         
-    print("-" * 60)
+    print("-" * 60, file=sys.stderr)
     
     while True:
         try:
-            choice = input("\nSelect session (1-20) or 'q' to quit: ").strip().lower()
+            # input() writes the prompt to stdout/stderr depending on implementation, 
+            # safer to print prompt explicitly to stderr then read stdin
+            sys.stderr.write("\nSelect session (1-20) or 'q' to quit: ")
+            sys.stderr.flush()
+            choice = sys.stdin.readline().strip().lower()
+            
             if choice == 'q':
                 sys.exit(0)
             
+            # Handle empty input
+            if not choice:
+                continue
+                
             idx = int(choice) - 1
             if 0 <= idx < len(sessions):
                 return str(sessions[idx]['path'])
             else:
-                print("Invalid number.")
+                sys.stderr.write("Invalid number.\n")
         except ValueError:
-            print("Please enter a number.")
+             sys.stderr.write("Please enter a number.\n")
         except KeyboardInterrupt:
             sys.exit(0)
 
@@ -235,7 +244,7 @@ def main():
         if sys.stdin.isatty():
             args.input_file = select_session()
         else:
-            print("Error: No input file provided and not running interactively.")
+            print("Error: No input file provided and not running interactively.", file=sys.stderr)
             sys.exit(1)
             
     convert(args.input_file, args.output_file, mode)
