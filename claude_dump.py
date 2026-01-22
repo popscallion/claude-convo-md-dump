@@ -2,6 +2,8 @@ import json
 import sys
 import os
 import argparse
+import glob
+from pathlib import Path
 from datetime import datetime
 
 # Mode documentation for both CLI help and Output headers
@@ -19,6 +21,75 @@ def format_timestamp(ts_str):
         return dt.strftime('%Y-%m-%d %H:%M:%S')
     except:
         return ts_str
+
+def find_recent_sessions(limit=20):
+    """Scan ~/.claude/projects for recent .jsonl sessions"""
+    base_dir = Path.home() / ".claude" / "projects"
+    if not base_dir.exists():
+        return []
+
+    sessions = []
+    # Recursively find all jsonl files
+    # Note: This might be slow if there are thousands, but usually manageable
+    for path in base_dir.rglob("*.jsonl"):
+        if "agent-" in path.name:
+            continue
+            
+        try:
+            stat = path.stat()
+            # Read first line to check for file-history-snapshot or similar
+            # Use size and mtime
+            sessions.append({
+                "path": path,
+                "mtime": stat.st_mtime,
+                "size": stat.st_size
+            })
+        except OSError:
+            continue
+            
+    # Sort by mtime descending
+    sessions.sort(key=lambda x: x["mtime"], reverse=True)
+    return sessions[:limit]
+
+def select_session():
+    """Interactive session selector"""
+    sessions = find_recent_sessions()
+    
+    if not sessions:
+        print("No Claude sessions found in ~/.claude/projects")
+        sys.exit(1)
+        
+    print("\nRecent Claude Sessions:")
+    print(f"{'#':<4} {'Date':<18} {'Size':<10} {'Filename'}")
+    print("-" * 60)
+    
+    for i, s in enumerate(sessions):
+        dt = datetime.fromtimestamp(s['mtime']).strftime('%Y-%m-%d %H:%M')
+        size_kb = f"{s['size'] / 1024:.1f}KB"
+        name = s['path'].name
+        # Try to make filename more readable if it's a UUID
+        if len(name) > 40:
+             name = name[:37] + "..."
+             
+        print(f"{i+1:<4} {dt:<18} {size_kb:<10} {name}")
+        
+    print("-" * 60)
+    
+    while True:
+        try:
+            choice = input("\nSelect session (1-20) or 'q' to quit: ").strip().lower()
+            if choice == 'q':
+                sys.exit(0)
+            
+            idx = int(choice) - 1
+            if 0 <= idx < len(sessions):
+                return str(sessions[idx]['path'])
+            else:
+                print("Invalid number.")
+        except ValueError:
+            print("Please enter a number.")
+        except KeyboardInterrupt:
+            sys.exit(0)
 
 def render_block(block, mode):
     b_type = block.get("type")
@@ -142,7 +213,8 @@ def main():
         description=desc,
         formatter_class=argparse.RawTextHelpFormatter
     )
-    parser.add_argument("input_file", help="Path to input .jsonl file")
+    # Make input_file optional
+    parser.add_argument("input_file", nargs="?", help="Path to input .jsonl file")
     parser.add_argument("output_file", nargs="?", help="Path to output .md file (optional)")
     
     group = parser.add_mutually_exclusive_group()
@@ -151,13 +223,21 @@ def main():
     
     args = parser.parse_args()
     
-    # Default is chat (Level 4)
+    # Determine mode
     mode = "chat"
     if args.verbose:
         mode = "verbose"
     elif args.thoughts:
         mode = "thoughts"
-        
+    
+    # Handle missing input file -> Interactive mode
+    if not args.input_file:
+        if sys.stdin.isatty():
+            args.input_file = select_session()
+        else:
+            print("Error: No input file provided and not running interactively.")
+            sys.exit(1)
+            
     convert(args.input_file, args.output_file, mode)
 
 if __name__ == "__main__":
