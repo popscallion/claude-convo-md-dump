@@ -1,49 +1,70 @@
-# claude-convo-md-dump
+# as-i-was-saying
 
-A lightweight tool to convert Claude Code JSONL transcripts into single-file Markdown transcripts.
+A small CLI that turns Claude or Codex JSONL session logs into a single Markdown transcript.
+
+**Philosophy**
+- Human-readable output over clever formatting.
+- One renderer, consistent modes, and no silent data loss.
+- Resilient to schema changes by preserving unknown blocks.
 
 ## Usage
 
-### Interactive Mode (Recommended)
-
-Run without arguments to see a list of recent sessions:
-
+**Interactive picker (Claude by default)**
 ```bash
-claude-md-dump
+as-i-was-saying
 ```
 
-Select a session number, and the Markdown will be printed to stdout.
-
-**Tip:** Pipe to your clipboard or a file:
-
+**Convert a specific file**
 ```bash
-# Copy to clipboard (Mac)
-claude-md-dump | pbcopy
-
-# Save to file
-claude-md-dump > transcript.md
+as-i-was-saying path/to/session.jsonl
+as-i-was-saying path/to/session.jsonl output.md
 ```
 
-### Direct File Mode
+## Backends
 
-Convert a specific file:
+Claude is the default backend. Codex sessions require `--backend codex`.
 
 ```bash
-claude-md-dump path/to/session.jsonl [output.md]
+as-i-was-saying --backend codex ~/.codex/sessions/2026/01/27/rollout-...jsonl
 ```
+
+If you pass a file path under `~/.codex/sessions` or `~/.claude/projects`, the tool will infer the backend automatically.
 
 ## Modes
 
-*   (Default) **Chat**: Clean text only. No tools or thinking blocks.
-*   `--thoughts`: **Logic Flow**. Includes thinking blocks and tool inputs, but suppresses file dump outputs. Best for reviewing the agent's decision-making.
-*   `--verbose`: **Full Record**. Includes everything.
+- `chat` (default): text-only, no thinking or tool output.
+- `thoughts`: includes thinking and tool usage, omits tool outputs.
+- `verbose`: includes all thinking and full tool outputs.
 
-## Features
+```bash
+as-i-was-saying --thoughts path/to/session.jsonl
+as-i-was-saying --verbose path/to/session.jsonl
+```
 
-*   **Smart Filtering:** Automatically hides "ghost" sessions (warmups or failed starts with no user prompts).
-*   **Clean Summaries:** Shows the first user prompt in the interactive list.
-*   **Stdio Friendly:** Interactive menu prints to stderr, so you can safely redirect stdout (Markdown) to files or pipes.
+## Data Locations
+
+- Claude: `~/.claude/projects`
+- Codex: `~/.codex/sessions`
+
+## Development
+
+Testing uses `uv`:
+```bash
+uv venv
+uv pip install -e '.[dev]'
+uv run python -m pytest -q
+```
+
+Fixtures are anonymized JSONL samples under `tests/fixtures/` with expected outputs.
+Regenerate expected outputs with:
+```bash
+uv run python tools/regenerate_fixtures.py
+```
 
 ## Credits
 
 Inspired by [simonw/claude-code-transcripts](https://github.com/simonw/claude-code-transcripts).
+
+## License
+
+GPL-3.0-only. See `LICENSE`.

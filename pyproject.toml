@@ -1,17 +1,24 @@
 [project]
-name = "claude-convo-md-dump"
+name = "as-i-was-saying"
 version = "0.1.7"
-description = "A lightweight tool to convert Claude Code JSONL transcripts to single-file Markdown."
+description = "A lightweight tool to convert Claude and Codex JSONL transcripts to single-file Markdown."
 readme = "README.md"
+license = { text = "GPL-3.0-only" }
 requires-python = ">=3.7"
 dependencies = []
 
+[project.optional-dependencies]
+dev = ["pytest"]
+
 [project.scripts]
-claude-md-dump = "claude_dump:main"
+as-i-was-saying = "as_i_was_saying:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.hatch.build.targets.wheel]
-packages = ["claude_dump.py"]
+packages = ["as_i_was_saying.py"]
