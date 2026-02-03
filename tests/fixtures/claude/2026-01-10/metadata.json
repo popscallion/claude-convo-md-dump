@@ -1,0 +1,18 @@
+{
+  "backend": "claude",
+  "captured_at": "2026-02-03T15:03:00.128835Z",
+  "schema_version": "claude.v1",
+  "source_path": "/Users/USER/.claude/projects/-Users-l-Dev-fahn-lai-bun/97d08ed5-18dc-4d37-85e6-e1d4cb658292/subagents/agent-ad36252.jsonl",
+  "notes": {
+    "row_types": [
+      "assistant",
+      "user"
+    ],
+    "block_types": [
+      "text",
+      "tool_result",
+      "tool_use"
+    ],
+    "file_size_bytes": 2889
+  }
+}

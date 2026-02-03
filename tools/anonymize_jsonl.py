@@ -18,6 +18,11 @@ UUID_RE = re.compile(
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
     re.IGNORECASE,
 )
+EMAIL_RE = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
+)
+URL_RE = re.compile(r"(https?://)([^/\s]+)", re.IGNORECASE)
+HOSTPORT_RE = re.compile(r"\b([A-Za-z0-9.-]+\.[A-Za-z]{2,})(:\d{2,5})\b")
 
 DEFAULT_TRUNCATE = 2000
 
@@ -45,6 +50,45 @@ def _redact_string(value: str, mappings: Dict[str, Dict[str, str]], max_len: int
 
     value = UUID_RE.sub(_uuid_repl, value)
 
+    # Replace emails with stable tokens
+    def _email_repl(match: re.Match[str]) -> str:
+        return _stable_token(match.group(0), "EMAIL", mappings["email"])
+
+    value = EMAIL_RE.sub(_email_repl, value)
+
+    # Replace hostnames inside URLs
+    def _url_repl(match: re.Match[str]) -> str:
+        scheme = match.group(1)
+        hostport = match.group(2)
+
+        userinfo = None
+        if "@" in hostport:
+            userinfo, hostport = hostport.split("@", 1)
+
+        host = hostport
+        port = ""
+        if ":" in hostport:
+            possible_host, possible_port = hostport.rsplit(":", 1)
+            if possible_port.isdigit():
+                host = possible_host
+                port = ":" + possible_port
+
+        host_token = _stable_token(host, "HOST", mappings["host"])
+        if userinfo:
+            return f"{scheme}USERINFO@{host_token}{port}"
+        return f"{scheme}{host_token}{port}"
+
+    value = URL_RE.sub(_url_repl, value)
+
+    # Replace host:port patterns (when not part of a URL)
+    def _hostport_repl(match: re.Match[str]) -> str:
+        host = match.group(1)
+        port = match.group(2)
+        host_token = _stable_token(host, "HOST", mappings["host"])
+        return f"{host_token}{port}"
+
+    value = HOSTPORT_RE.sub(_hostport_repl, value)
+
     # Truncate extremely long strings to keep fixtures small
     if len(value) > max_len:
         return value[: max_len // 2] + f"[TRUNCATED len={len(value)}]" + value[-max_len // 2 :]
@@ -65,6 +109,8 @@ def _redact(obj: Any, mappings: Dict[str, Dict[str, str]], max_len: int) -> Any:
 def anonymize_file(input_path: Path, output_path: Path, max_len: int) -> None:
     mappings: Dict[str, Dict[str, str]] = {
         "uuid": {},
+        "email": {},
+        "host": {},
     }
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

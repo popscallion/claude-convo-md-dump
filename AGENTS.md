@@ -41,7 +41,7 @@ This file defines development rules and architectural choices for this repo. It 
 - Fixtures live in `tests/fixtures/`.
 - Always anonymize source JSONL before committing fixtures:
   - Use `tools/anonymize_jsonl.py`.
-  - Replace home paths and UUIDs; truncate long strings.
+  - Replace home paths, UUIDs, emails, and hostnames; truncate long strings.
   - Preserve JSON structure; write keys sorted for stable diffs.
 - Keep `tests/fixtures/manifest.json` up to date.
 - Regenerate expected outputs with:
@@ -55,6 +55,15 @@ This file defines development rules and architectural choices for this repo. It 
   - `uv run python -m pytest -q`
 - If you change parsing or rendering, update fixtures and expected outputs.
 
+## Pre-Commit Hook
+
+- The repo uses `.githooks/pre-commit` and expects `core.hooksPath` to be set to `.githooks`.
+- If hooks are missing, run:
+  - `git config core.hooksPath .githooks`
+- The pre-commit hook runs:
+  - `uv lock --check`
+  - `uv run python -m pytest -q`
+
 ## Change Discipline
 
 - Do not silently change output formatting.
@@ -62,3 +71,8 @@ This file defines development rules and architectural choices for this repo. It 
   - Update fixtures and expected outputs.
   - Update `README.md` for user-facing effects.
   - Update this file for architectural or workflow changes.
+
+## Session Handoff
+
+- Before concluding a session, reflect briefly on what was done and whether any improvements are available.
+- Be proactive about next steps (e.g., offer to commit/push or update docs/tests when appropriate), rather than waiting for the user to ask.

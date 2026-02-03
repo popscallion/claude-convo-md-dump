@@ -46,6 +46,18 @@ as-i-was-saying --verbose path/to/session.jsonl
 - Claude: `~/.claude/projects`
 - Codex: `~/.codex/sessions`
 
+## Known Limitations
+
+- Codex `reasoning` entries are rendered from the summary when available; encrypted content is not shown.
+- If a backend emits a new block type, it will appear as raw JSON until normalization is updated.
+- `chat` mode omits tool-only turns (those without text blocks).
+- Backend inference is path-based; if logs are moved, pass `--backend` explicitly.
+
+## Privacy Notes
+
+- Fixtures are anonymized, but logs can still contain sensitive data.
+- If you fork this repo and are not contributing back, keep the fork private.
+
 ## Development
 
 Testing uses `uv`:
@@ -60,6 +72,19 @@ Regenerate expected outputs with:
 ```bash
 uv run python tools/regenerate_fixtures.py
 ```
+
+### History Scrub (if needed)
+
+If you ever need to purge sensitive fixture history, use `git filter-repo` and force-push:
+
+```bash
+git filter-repo --path tests/fixtures --invert-paths
+
+git push --force --all
+git push --force --tags
+```
+
+Then re-add sanitized fixtures and regenerate outputs.
 
 ## Credits
 

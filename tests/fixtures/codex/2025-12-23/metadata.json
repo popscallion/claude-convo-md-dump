@@ -1,0 +1,28 @@
+{
+  "backend": "codex",
+  "captured_at": "2026-02-03T15:03:00.128835Z",
+  "schema_version": "codex.v1",
+  "source_path": "/Users/USER/.codex/sessions/2025/12/23/rollout-2025-12-23T14-43-13-019b4cbc-b191-7562-b4b9-c31044af3440.jsonl",
+  "notes": {
+    "top_level_types": [
+      "event_msg",
+      "response_item",
+      "session_meta",
+      "turn_context"
+    ],
+    "response_item_types": [
+      "function_call",
+      "function_call_output",
+      "ghost_snapshot",
+      "message",
+      "reasoning"
+    ],
+    "event_msg_types": [
+      "agent_message",
+      "agent_reasoning",
+      "token_count",
+      "user_message"
+    ],
+    "file_size_bytes": 41362
+  }
+}
