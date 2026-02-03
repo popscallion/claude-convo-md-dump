@@ -33,6 +33,11 @@ Restart your shell after updating PATH. You can also add the tool directory manu
 uv tool dir
 ```
 
+To uninstall:
+```bash
+uv tool uninstall as-i-was-saying
+```
+
 ## Backends
 
 Claude is the default backend. Codex sessions require `--backend codex`.
