@@ -36,9 +36,14 @@ if [ -d "$scan_path" ]; then
     privacy_fail=1
   fi
 
-  if rg -n "\\b(?:[0-9A-Fa-f]{1,4}:){2,}[0-9A-Fa-f]{1,4}\\b" "$scan_path"; then
-    echo "pre-commit: privacy scan failed (ipv6)" >&2
-    privacy_fail=1
+  ipv6_matches="$(rg -n "\\b(?:[0-9A-Fa-f]{1,4}:){2,}[0-9A-Fa-f]{1,4}\\b" "$scan_path" || true)"
+  if [ -n "$ipv6_matches" ]; then
+    # Exclude standard timestamps (YYYY-MM-DD HH:MM:SS) from IPv6 detection
+    if echo "$ipv6_matches" | rg -v "\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}" >/dev/null; then
+      echo "$ipv6_matches" | rg -v "\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"
+      echo "pre-commit: privacy scan failed (ipv6)" >&2
+      privacy_fail=1
+    fi
   fi
 
   if rg -n "\\b(sk-[A-Za-z0-9]{10,}|sk_live_[A-Za-z0-9]{10,}|gh[opurs]_[A-Za-z0-9]{30,}|xox[baprs]-[A-Za-z0-9-]{10,}|A(?:KIA|SIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|ya29\\.[0-9A-Za-z_-]+)\\b" "$scan_path"; then

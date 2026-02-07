@@ -1,0 +1,2 @@
+{"type": "event_msg", "payload": {"type": "user_message", "text": "Hello Codex"}}
+{"type": "event_msg", "payload": {"type": "agent_message", "text": "Hello User"}}

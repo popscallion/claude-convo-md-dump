@@ -20,17 +20,31 @@ def anonymize_file(input_path: Path, output_path: Path, max_len: int) -> None:
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with input_path.open("r", encoding="utf-8") as src, output_path.open(
-        "w", encoding="utf-8"
-    ) as dst:
-        for line in src:
-            line = line.strip()
-            if not line:
-                continue
-            obj = json.loads(line)
-            redacted = redactor.redact(obj)
-            dst.write(json.dumps(redacted, ensure_ascii=True, sort_keys=True))
+    if input_path.suffix == ".json":
+        # Handle single JSON object (Gemini)
+        with input_path.open("r", encoding="utf-8") as src:
+            data = json.load(src)
+            redacted = redactor.redact(data)
+        
+        with output_path.open("w", encoding="utf-8") as dst:
+            json.dump(redacted, dst, indent=2, ensure_ascii=True, sort_keys=True)
             dst.write("\n")
+    else:
+        # Handle JSONL (Claude/Codex)
+        with input_path.open("r", encoding="utf-8") as src, output_path.open(
+            "w", encoding="utf-8"
+        ) as dst:
+            for line in src:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    redacted = redactor.redact(obj)
+                    dst.write(json.dumps(redacted, ensure_ascii=True, sort_keys=True))
+                    dst.write("\n")
+                except json.JSONDecodeError:
+                    continue
 
 
 def main() -> None:

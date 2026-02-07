@@ -40,13 +40,14 @@ uv tool uninstall as-i-was-saying
 
 ## Backends
 
-Claude is the default backend. Codex sessions require `--backend codex`.
+Claude is the default backend. Codex and Gemini sessions require specifying the backend or using a path that allows inference.
 
 ```bash
 as-i-was-saying --backend codex ~/.codex/sessions/2026/01/27/rollout-...jsonl
+as-i-was-saying --backend gemini ~/.gemini/tmp/.../chats/session-...json
 ```
 
-If you pass a file path under `~/.codex/sessions` or `~/.claude/projects`, the tool will infer the backend automatically.
+If you pass a file path under `~/.codex/sessions`, `~/.claude/projects`, or `~/.gemini/tmp`, the tool will infer the backend automatically.
 
 ## Modes
 
@@ -72,6 +73,7 @@ Redaction is opt-in and prints loud warnings in the output. It is not guaranteed
 
 - Claude: `~/.claude/projects`
 - Codex: `~/.codex/sessions`
+- Gemini: `~/.gemini/tmp`
 
 ## Known Limitations
 

@@ -37,7 +37,7 @@ def run_cli(repo_root: Path, raw_path: Path, backend: str, mode_flag: Optional[s
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Regenerate expected Markdown outputs for fixtures.")
-    parser.add_argument("--backend", choices=["claude", "codex"], help="Limit to a backend")
+    parser.add_argument("--backend", choices=["claude", "codex", "gemini"], help="Limit to a backend")
     parser.add_argument("--fixture", help="Substring filter for fixture paths")
     args = parser.parse_args()
 
@@ -47,12 +47,19 @@ def main() -> None:
     for backend, fixture_dir in iter_fixtures(fixtures_root, args.backend, args.fixture):
         raw_path = fixture_dir / "raw.jsonl"
         if not raw_path.exists():
+            raw_path = fixture_dir / "raw.json"
+        
+        if not raw_path.exists():
             continue
 
         for mode, flag in [("chat", None), ("thoughts", "--thoughts"), ("verbose", "--verbose")]:
-            output = run_cli(repo_root, raw_path, backend, flag)
-            out_path = fixture_dir / f"expected_{mode}.md"
-            out_path.write_text(output, encoding="utf-8")
+            try:
+                output = run_cli(repo_root, raw_path, backend, flag)
+                out_path = fixture_dir / f"expected_{mode}.md"
+                out_path.write_text(output, encoding="utf-8")
+                print(f"Regenerated {out_path}")
+            except RuntimeError as e:
+                print(f"Error regenerating {fixture_dir.name} ({mode}): {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

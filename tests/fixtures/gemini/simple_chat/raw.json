@@ -1,0 +1,45 @@
+{
+  "sessionId": "8b68aa80-a29d-4373-b6ef-238d0380ffb3",
+  "projectHash": "d921e504a5a85b56bbe234d9954a13c4baf5b669abdaaafdbc117d15ae01e6cd",
+  "startTime": "2026-02-07T17:30:08.748Z",
+  "messages": [
+    {
+      "id": "e483362a-9fed-45ac-ad54-f6eca497ecdd",
+      "timestamp": "2026-02-07T17:30:08.748Z",
+      "type": "user",
+      "content": "Hello Gemini"
+    },
+    {
+      "id": "2fc9cf29-cf80-4427-b89e-81826c90e0cd",
+      "timestamp": "2026-02-07T17:31:09.803Z",
+      "type": "gemini",
+      "content": "I will read a file.",
+      "toolCalls": [
+        {
+          "id": "call-1",
+          "name": "read_file",
+          "args": {
+            "file_path": "README.md"
+          },
+          "result": [
+            {
+              "functionResponse": {
+                "name": "read_file",
+                "response": {
+                  "output": "# My Project"
+                }
+              }
+            }
+          ],
+          "status": "success"
+        }
+      ]
+    },
+    {
+      "id": "error-1",
+      "timestamp": "2026-02-07T17:32:00.000Z",
+      "type": "error",
+      "content": "Something went wrong"
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+{"type": "user", "message": {"role": "user", "content": "Hello Claude"}}
+{"type": "assistant", "message": {"role": "assistant", "content": "Hello User"}}
