@@ -1,6 +1,6 @@
 # as-i-was-saying
 
-A small CLI that turns Claude or Codex JSONL session logs into a single Markdown transcript.
+A small CLI that turns Claude, Codex, or Gemini session logs into a single Markdown transcript.
 
 **Philosophy**
 - Human-readable output over clever formatting.
@@ -18,6 +18,17 @@ as-i-was-saying
 ```bash
 as-i-was-saying path/to/session.jsonl
 as-i-was-saying path/to/session.jsonl output.md
+```
+
+**Filter Output**
+Limit to the most recent messages (`-n` / `--tail`) or the first messages (`--head`).
+Note: These flags count messages containing text, ignoring tool-only turns.
+```bash
+# Show only the last 5 messages
+as-i-was-saying -n 5
+
+# Show the first 2 messages
+as-i-was-saying --head 2
 ```
 
 ## Install to PATH (optional)
@@ -71,9 +82,11 @@ Redaction is opt-in and prints loud warnings in the output. It is not guaranteed
 
 ## Data Locations
 
-- Claude: `~/.claude/projects`
-- Codex: `~/.codex/sessions`
-- Gemini: `~/.gemini/tmp`
+The tool automatically detects sessions in these default locations. You can override them by setting the corresponding environment variable.
+
+- **Claude**: `~/.claude/projects` (Override: `CLAUDE_LOG_DIR`)
+- **Codex**: `~/.codex/sessions` (Override: `CODEX_LOG_DIR`)
+- **Gemini**: `~/.gemini/tmp` (Override: `GEMINI_LOG_DIR`)
 
 ## Known Limitations
 
@@ -102,6 +115,14 @@ rg -n "\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b" tests/fixtures
 rg -n "\\b(?:[0-9A-Fa-f]{1,4}:){2,}[0-9A-Fa-f]{1,4}\\b" tests/fixtures
 rg -n "\\b(sk-[A-Za-z0-9]{10,}|sk_live_[A-Za-z0-9]{10,}|gh[opurs]_[A-Za-z0-9]{30,}|xox[baprs]-[A-Za-z0-9-]{10,}|A(?:KIA|SIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|ya29\\.[0-9A-Za-z_-]+)\\b" tests/fixtures
 ```
+
+## Maintenance & Agent Skills
+
+This repo includes "Agent Skills" to assist with maintenance when schemas change.
+
+- **Storage Investigator**: `skills/investigate_zed_storage.md`
+    - Use this skill to rediscover log locations if Zed or an agent backend changes its storage strategy.
+    - Findings are snapshotted in `tests/fixtures/docs/`.
 
 ## Development
 
