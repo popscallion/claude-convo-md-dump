@@ -7,6 +7,7 @@ This file defines development rules and architectural choices for this repo. It 
 - Root-level Markdown files are limited to `README.md` and `AGENTS.md`.
 - User-facing guidance belongs in `README.md`.
 - Developer policies, architectural decisions, and workflow mandates belong here.
+- Agent Skills (procedural guides for agents) belong in `skills/`.
 - If behavior changes, update both docs in a coordinated way:
   - `README.md` for user-facing changes.
   - `AGENTS.md` for policy or architecture changes.
