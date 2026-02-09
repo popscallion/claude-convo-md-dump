@@ -520,6 +520,12 @@ def main() -> None:
         help="Select backend (default: auto/all)",
     )
 
+    parser.add_argument(
+        "--list-all",
+        action="store_true",
+        help="List recent sessions from all backends (interactive)",
+    )
+
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument(
         "--mode",
@@ -585,6 +591,11 @@ def main() -> None:
         redaction = "standard"
 
     backend = args.backend
+
+    if args.list_all:
+        # Force list all backends
+        backend = None
+        args.input_file = None
 
     if args.input_file:
         inferred = infer_backend_from_path(args.input_file)
