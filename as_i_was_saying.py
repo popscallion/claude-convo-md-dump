@@ -1,10 +1,12 @@
 import argparse
 import json
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from redaction import Redactor
 from backends import normalize_event
@@ -178,24 +180,96 @@ def find_recent_sessions(backend: str, limit: int = 20) -> List[Dict[str, Any]]:
     return valid_sessions
 
 
-def select_session(backend: str) -> str:
-    """Interactive session selector"""
-    sessions = find_recent_sessions(backend)
+def collect_all_sessions(limit_per_backend: int = 50) -> List[Dict[str, Any]]:
+    """Aggregate recent sessions from all supported backends."""
+    all_sessions = []
+    for backend in SUPPORTED_BACKENDS:
+        sessions = find_recent_sessions(backend, limit=limit_per_backend)
+        for s in sessions:
+            s["backend"] = backend
+        all_sessions.extend(sessions)
+    
+    # Sort unified list by time (newest first)
+    all_sessions.sort(key=lambda x: x["mtime"], reverse=True)
+    return all_sessions
 
-    if not sessions:
-        print(f"No {backend.title()} sessions found in {get_base_dir(backend)}", file=sys.stderr)
-        sys.exit(1)
 
-    print(f"\nRecent {backend.title()} Sessions:", file=sys.stderr)
+def fzf_select(sessions: List[Dict[str, Any]]) -> Optional[str]:
+    """Use fzf to select a session from the list."""
+    fzf = shutil.which("fzf")
+    if not fzf:
+        return None
 
-    for i, s in enumerate(sessions):
+    # Format lines for fzf: "[BACKEND] YYYY-MM-DD HH:MM | Summary"
+    lines = []
+    map_lines = {}
+    
+    for s in sessions:
+        dt = datetime.fromtimestamp(s["mtime"]).strftime("%Y-%m-%d %H:%M")
+        # Pad backend name for alignment
+        bk = s['backend'].upper()
+        summary = s.get('summary', 'No summary')
+        line = f"[{bk:<6}] {dt} | {summary}"
+        lines.append(line)
+        map_lines[line] = str(s["path"])
+
+    try:
+        proc = subprocess.Popen(
+            [fzf, "--no-sort", "--header", "Select a session (most recent first)"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        stdout, _ = proc.communicate(input="\n".join(lines))
+        
+        if proc.returncode == 0 and stdout.strip():
+            selected = stdout.strip()
+            return map_lines.get(selected)
+    except Exception:
+        pass
+        
+    return None
+
+
+def select_session(backend: Optional[str] = None) -> str:
+    """Interactive session selector.
+    
+    If backend is provided, limits to that backend.
+    Otherwise, aggregates all backends.
+    """
+    if backend:
+        sessions = find_recent_sessions(backend)
+        if not sessions:
+            print(f"No {backend.title()} sessions found in {get_base_dir(backend)}", file=sys.stderr)
+            sys.exit(1)
+        # Tag them for consistency
+        for s in sessions:
+            s["backend"] = backend
+    else:
+        sessions = collect_all_sessions()
+        if not sessions:
+            print("No sessions found in any backend.", file=sys.stderr)
+            sys.exit(1)
+
+    # Try fzf first
+    path = fzf_select(sessions)
+    if path:
+        return path
+
+    # Fallback to simple numeric menu
+    print(f"\nRecent Sessions:", file=sys.stderr)
+    
+    display_limit = 20
+    for i, s in enumerate(sessions[:display_limit]):
         dt = datetime.fromtimestamp(s["mtime"]).strftime("%Y-%m-%d %H:%M")
         size_kb = f"{s['size'] / 1024:.0f}KB"
-        print(f"{i+1:2}. {dt} ({size_kb:>5})  {s['summary']}", file=sys.stderr)
+        bk = s['backend'].upper()
+        print(f"{i+1:2}. [{bk:<6}] {dt} ({size_kb:>5})  {s['summary']}", file=sys.stderr)
 
     while True:
         try:
-            sys.stderr.write("\nSelect session (1-20) or 'q' to quit: ")
+            sys.stderr.write(f"\nSelect session (1-{min(len(sessions), display_limit)}) or 'q' to quit: ")
             sys.stderr.flush()
             choice = sys.stdin.readline().strip().lower()
 
@@ -421,8 +495,7 @@ def main() -> None:
     parser.add_argument(
         "--backend",
         choices=SUPPORTED_BACKENDS,
-        default="claude",
-        help="Select backend (default: claude)",
+        help="Select backend (default: auto/all)",
     )
 
     mode_group = parser.add_mutually_exclusive_group()
@@ -493,15 +566,34 @@ def main() -> None:
 
     if args.input_file:
         inferred = infer_backend_from_path(args.input_file)
-        if inferred and inferred != backend:
+        # If explicitly set, respect it. If not, use inferred.
+        if inferred and not backend:
             backend = inferred
+        # If explicit mismatch, keep explicit (though it might fail parsing)
 
     if not args.input_file:
         if sys.stdin.isatty():
+            # If backend is None, select_session will aggregate all
             args.input_file = select_session(backend)
+            # After selection, we must ensure we know the backend for parsing
+            if not backend:
+                backend = infer_backend_from_path(args.input_file)
+                # Fallback if inference fails (unlikely for known paths)
+                if not backend:
+                    # Try to guess or error out? 
+                    # Actually, normalize_event needs a backend.
+                    # Let's assume standard paths for now or check file content type?
+                    # For now, inference is robust enough for standard paths.
+                    pass
         else:
             print("Error: No input file provided and not running interactively.", file=sys.stderr)
             sys.exit(1)
+    
+    # Final safety check: if we still don't have a backend (e.g. random file provided without --backend)
+    # Default to claude? Or try to sniff? 
+    # Current behavior was default='claude'. Let's keep a safe default if still None.
+    if not backend:
+        backend = "claude"
 
     convert(args.input_file, args.output_file, mode, backend, redaction, args.tail, args.head)
 
