@@ -1,0 +1,31 @@
+{
+  "sessionId": "reasoning-test-1",
+  "projectHash": "hash123",
+  "startTime": "2026-02-08T10:00:00.000Z",
+  "messages": [
+    {
+      "id": "msg-1",
+      "timestamp": "2026-02-08T10:00:00.000Z",
+      "type": "user",
+      "content": "Why is the sky blue?"
+    },
+    {
+      "id": "msg-2",
+      "timestamp": "2026-02-08T10:00:05.000Z",
+      "type": "gemini",
+      "content": "The sky is blue because of Rayleigh scattering.",
+      "thoughts": [
+        {
+          "subject": "Physics Recall",
+          "description": "Accessing knowledge about atmospheric optics and light scattering.",
+          "timestamp": "2026-02-08T10:00:02.000Z"
+        },
+        {
+          "subject": "Formulation",
+          "description": "Constructing a concise explanation focusing on Rayleigh scattering.",
+          "timestamp": "2026-02-08T10:00:04.000Z"
+        }
+      ]
+    }
+  ]
+}

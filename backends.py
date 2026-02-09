@@ -251,6 +251,18 @@ def normalize_gemini_event(raw: Dict[str, Any]) -> List[Event]:
 
     if msg_type == "gemini":
         blocks: List[Block] = []
+        
+        # Handle thoughts (Gemini Flash Thinking / Reasoning)
+        thoughts = raw.get("thoughts", [])
+        if isinstance(thoughts, list):
+            for t in thoughts:
+                if isinstance(t, dict):
+                    subject = t.get("subject", "")
+                    desc = t.get("description", "")
+                    if desc:
+                        text = f"**{subject}**\n{desc}" if subject else desc
+                        blocks.append({"type": "thinking", "thinking": text})
+
         if content:
             blocks.append({"type": "text", "text": content})
 
