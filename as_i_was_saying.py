@@ -184,6 +184,8 @@ def find_recent_sessions(backend: str, limit: int = 20) -> List[Dict[str, Any]]:
 
 def format_size(size_bytes: int) -> str:
     kb = size_bytes / 1024
+    if kb < 100:
+        return f"{kb:2.0f}KB"
     if kb < 1000:
         return f"{kb:3.0f}KB"
     mb = kb / 1024
@@ -196,6 +198,20 @@ def get_backend_abbr(backend: str) -> str:
         "codex": "CDX",
         "gemini": "GMN",
     }.get(backend, backend[:3].upper())
+
+
+def collect_all_sessions(limit_per_backend: int = 50) -> List[Dict[str, Any]]:
+    """Aggregate recent sessions from all supported backends."""
+    all_sessions = []
+    for backend in SUPPORTED_BACKENDS:
+        sessions = find_recent_sessions(backend, limit=limit_per_backend)
+        for s in sessions:
+            s["backend"] = backend
+        all_sessions.extend(sessions)
+    
+    # Sort unified list by time (newest first)
+    all_sessions.sort(key=lambda x: x["mtime"], reverse=True)
+    return all_sessions
 
 
 def fzf_select(sessions: List[Dict[str, Any]]) -> Optional[str]:
@@ -239,7 +255,7 @@ def fzf_select(sessions: List[Dict[str, Any]]) -> Optional[str]:
 
 
 def select_session(backend: Optional[str] = None) -> str:
-    """Interactive session selector.
+    """Interactive session selector. 
     
     If backend is provided, limits to that backend.
     Otherwise, aggregates all backends.
