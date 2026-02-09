@@ -72,14 +72,15 @@ def extract_text_from_blocks(blocks: List[Dict[str, Any]]) -> str:
 
 
 def get_session_summary(filepath: str, backend: str) -> Optional[str]:
-    """Read first user message from session file"""
+    """Read last user message from session file"""
+    last_user_text = None
     try:
         # Gemini is a single JSON file, not JSONL
         if backend == "gemini":
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 messages = data.get("messages", [])
-                for msg in messages:
+                for msg in reversed(messages):
                     events = normalize_event(msg, backend)
                     for event in events:
                         if event.get("role") != "user":
@@ -105,7 +106,8 @@ def get_session_summary(filepath: str, backend: str) -> Optional[str]:
                         continue
                     text = extract_text_from_blocks(event.get("blocks", []))
                     if text and not text.startswith("<"):
-                        return text
+                        last_user_text = text
+        return last_user_text
     except Exception:
         pass
     return None
@@ -169,8 +171,8 @@ def find_recent_sessions(backend: str, limit: int = 20) -> List[Dict[str, Any]]:
             continue
 
         clean_summary = raw_summary.replace("\n", " ").strip()
-        if len(clean_summary) > 60:
-            clean_summary = clean_summary[:57] + "..."
+        if len(clean_summary) > 50:
+            clean_summary = clean_summary[:47] + "..."
         s["summary"] = clean_summary
         valid_sessions.append(s)
 
@@ -180,18 +182,20 @@ def find_recent_sessions(backend: str, limit: int = 20) -> List[Dict[str, Any]]:
     return valid_sessions
 
 
-def collect_all_sessions(limit_per_backend: int = 50) -> List[Dict[str, Any]]:
-    """Aggregate recent sessions from all supported backends."""
-    all_sessions = []
-    for backend in SUPPORTED_BACKENDS:
-        sessions = find_recent_sessions(backend, limit=limit_per_backend)
-        for s in sessions:
-            s["backend"] = backend
-        all_sessions.extend(sessions)
-    
-    # Sort unified list by time (newest first)
-    all_sessions.sort(key=lambda x: x["mtime"], reverse=True)
-    return all_sessions
+def format_size(size_bytes: int) -> str:
+    kb = size_bytes / 1024
+    if kb < 1000:
+        return f"{kb:3.0f}KB"
+    mb = kb / 1024
+    return f"{mb:3.1f}MB"
+
+
+def get_backend_abbr(backend: str) -> str:
+    return {
+        "claude": "CLD",
+        "codex": "CDX",
+        "gemini": "GMN",
+    }.get(backend, backend[:3].upper())
 
 
 def fzf_select(sessions: List[Dict[str, Any]]) -> Optional[str]:
@@ -200,16 +204,18 @@ def fzf_select(sessions: List[Dict[str, Any]]) -> Optional[str]:
     if not fzf:
         return None
 
-    # Format lines for fzf: "[BACKEND] YYYY-MM-DD HH:MM | Summary"
+    # Format lines for fzf: "BKD MM-DD HH:MM SIZE  Summary"
     lines = []
     map_lines = {}
     
     for s in sessions:
-        dt = datetime.fromtimestamp(s["mtime"]).strftime("%Y-%m-%d %H:%M")
-        # Pad backend name for alignment
-        bk = s['backend'].upper()
+        dt = datetime.fromtimestamp(s["mtime"]).strftime("%m-%d %H:%M")
+        bk = get_backend_abbr(s['backend'])
+        sz = format_size(s['size'])
         summary = s.get('summary', 'No summary')
-        line = f"[{bk:<6}] {dt} | {summary}"
+        
+        # "CLD 02-08 14:20  15KB  Summary..."
+        line = f"{bk} {dt} {sz:<5}  {summary}"
         lines.append(line)
         map_lines[line] = str(s["path"])
 
@@ -262,10 +268,10 @@ def select_session(backend: Optional[str] = None) -> str:
     
     display_limit = 20
     for i, s in enumerate(sessions[:display_limit]):
-        dt = datetime.fromtimestamp(s["mtime"]).strftime("%Y-%m-%d %H:%M")
-        size_kb = f"{s['size'] / 1024:.0f}KB"
-        bk = s['backend'].upper()
-        print(f"{i+1:2}. [{bk:<6}] {dt} ({size_kb:>5})  {s['summary']}", file=sys.stderr)
+        dt = datetime.fromtimestamp(s["mtime"]).strftime("%m-%d %H:%M")
+        bk = get_backend_abbr(s['backend'])
+        sz = format_size(s['size'])
+        print(f"{i+1:2}. {bk} {dt} {sz:<5}  {s['summary']}", file=sys.stderr)
 
     while True:
         try:

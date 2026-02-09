@@ -158,6 +158,19 @@ Then re-add sanitized fixtures and regenerate outputs.
 
 Inspired by [simonw/claude-code-transcripts](https://github.com/simonw/claude-code-transcripts).
 
+## Roadmap (v2)
+
+The current version (v0.2.0) focuses on robust parsing and simple recent-session discovery. Future versions aims to improve retrieval:
+
+- **Unified Search**: Search across all backends simultaneously.
+- **Content Search**: Fuzzy finding within conversation content (not just summaries).
+- **Turn-based Retrieval**: Ability to extract specific turns rather than full sessions.
+- **Date Filtering**: Scoped searches (e.g., `--since 2d`).
+
+**Implementation Notes:**
+- The current backend-agnostic architecture (`backends.py`) makes adding new sources (like OpenAI or local LLMs) straightforward.
+- Performance: Standard `rg` and `fzf` integration is preferred over building a custom indexing database for now.
+
 ## License
 
 GPL-3.0-only. See `LICENSE`.
