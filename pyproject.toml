@@ -1,6 +1,6 @@
 [project]
 name = "as-i-was-saying"
-version = "0.2.0"
+version = "0.2.3"
 description = "A lightweight tool to convert Claude, Codex, and Gemini session logs to single-file Markdown."
 readme = "README.md"
 license = { text = "GPL-3.0-only" }

@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,7 @@ MODE_DESCRIPTIONS = {
 }
 
 SUPPORTED_BACKENDS = ("claude", "codex", "gemini")
+CONTEXT_COL_WIDTH = 40
 
 
 def format_timestamp(ts_str: str) -> str:
@@ -43,6 +45,30 @@ def get_base_dir(backend: str) -> Path:
     
     env_path = os.getenv("CLAUDE_LOG_DIR")
     return Path(env_path) if env_path else Path.home() / ".claude" / "projects"
+
+
+def available_backends(requested_backend: Optional[str] = None) -> List[str]:
+    """Return implemented backends that are present on this system.
+
+    If a backend is explicitly requested, return it regardless of path existence.
+    """
+    if requested_backend:
+        return [requested_backend]
+    return [b for b in SUPPORTED_BACKENDS if get_base_dir(b).exists()]
+
+
+def parse_since_cutoff(spec: str) -> float:
+    """Parse duration spec into epoch cutoff timestamp.
+
+    Supported units: h, d, w (e.g. 12h, 1d, 2w).
+    """
+    match = re.match(r"^\s*(\d+)\s*([hdw])\s*$", spec, re.IGNORECASE)
+    if not match:
+        raise ValueError(f"Invalid --since value: {spec!r}. Use formats like 12h, 1d, 2w.")
+    amount = int(match.group(1))
+    unit = match.group(2).lower()
+    multiplier = {"h": 3600, "d": 86400, "w": 604800}[unit]
+    return datetime.now().timestamp() - (amount * multiplier)
 
 
 def infer_backend_from_path(path: str) -> Optional[str]:
@@ -71,24 +97,35 @@ def extract_text_from_blocks(blocks: List[Dict[str, Any]]) -> str:
     return " ".join(parts).strip()
 
 
-def get_session_summary(filepath: str, backend: str) -> Optional[str]:
-    """Read last user message from session file"""
-    last_user_text = None
+def _truncate_snippet(text: str, max_len: int = 50) -> str:
+    clean = text.replace("\n", " ").strip()
+    if len(clean) > max_len:
+        return clean[: max_len - 3] + "..."
+    return clean
+
+
+def get_session_context(filepath: str, backend: str) -> Tuple[Optional[str], Optional[str]]:
+    """Read latest and earliest user text snippets from a session file."""
+    latest_user_text = None
+    earliest_user_text = None
     try:
         # Gemini is a single JSON file, not JSONL
         if backend == "gemini":
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 messages = data.get("messages", [])
-                for msg in reversed(messages):
+                for msg in messages:
                     events = normalize_event(msg, backend)
                     for event in events:
                         if event.get("role") != "user":
                             continue
                         text = extract_text_from_blocks(event.get("blocks", []))
-                        if text:
-                            return text
-            return None
+                        if not text:
+                            continue
+                        if earliest_user_text is None:
+                            earliest_user_text = text
+                        latest_user_text = text
+            return latest_user_text, earliest_user_text
 
         # Claude/Codex (JSONL)
         with open(filepath, "r", encoding="utf-8") as f:
@@ -106,14 +143,56 @@ def get_session_summary(filepath: str, backend: str) -> Optional[str]:
                         continue
                     text = extract_text_from_blocks(event.get("blocks", []))
                     if text and not text.startswith("<"):
-                        last_user_text = text
-        return last_user_text
+                        if earliest_user_text is None:
+                            earliest_user_text = text
+                        latest_user_text = text
+        return latest_user_text, earliest_user_text
     except Exception:
         pass
-    return None
+    return None, None
 
 
-def find_recent_sessions(backend: str, limit: int = 20) -> List[Dict[str, Any]]:
+def analyze_session_query(filepath: str, backend: str, query: str) -> Tuple[int, str]:
+    """Return query match count plus a best-effort match-context snippet."""
+    needle = query.lower().strip()
+    if not needle:
+        return 0, ""
+    try:
+        events = collect_events(filepath, backend)
+    except Exception:
+        return 0, ""
+
+    total = 0
+    first_context = ""
+    for event in events:
+        for block in event.get("blocks", []):
+            if block.get("type") != "text":
+                continue
+            text = block.get("text", "")
+            if not text:
+                continue
+            lowered = text.lower()
+            total += lowered.count(needle)
+            if not first_context:
+                idx = lowered.find(needle)
+                if idx >= 0:
+                    start = max(0, idx - 25)
+                    end = min(len(text), idx + len(query) + 25)
+                    first_context = _truncate_snippet(text[start:end], max_len=60)
+    return total, first_context
+
+
+def get_session_summary(filepath: str, backend: str) -> Optional[str]:
+    """Backward-compat helper: latest user snippet."""
+    latest, _earliest = get_session_context(filepath, backend)
+    return latest
+
+
+def find_recent_sessions(
+    backend: str,
+    limit: int = 20,
+    since_cutoff: Optional[float] = None,
+) -> List[Dict[str, Any]]:
     """Scan backend directory for recent sessions"""
     base_dir = get_base_dir(backend)
     if not base_dir.exists():
@@ -145,7 +224,16 @@ def find_recent_sessions(backend: str, limit: int = 20) -> List[Dict[str, Any]]:
             for path in chats_dir.glob("session-*.json"):
                 try:
                     stat = path.stat()
-                    sessions.append({"path": path, "mtime": stat.st_mtime, "size": stat.st_size})
+                    if since_cutoff is not None and stat.st_mtime < since_cutoff:
+                        continue
+                    sessions.append(
+                        {
+                            "path": path,
+                            "mtime": stat.st_mtime,
+                            "size": stat.st_size,
+                            "session_id": extract_session_id(path, backend),
+                        }
+                    )
                 except OSError:
                     continue
     else:
@@ -156,7 +244,16 @@ def find_recent_sessions(backend: str, limit: int = 20) -> List[Dict[str, Any]]:
 
             try:
                 stat = path.stat()
-                sessions.append({"path": path, "mtime": stat.st_mtime, "size": stat.st_size})
+                if since_cutoff is not None and stat.st_mtime < since_cutoff:
+                    continue
+                sessions.append(
+                    {
+                        "path": path,
+                        "mtime": stat.st_mtime,
+                        "size": stat.st_size,
+                        "session_id": extract_session_id(path, backend),
+                    }
+                )
             except OSError:
                 continue
 
@@ -166,14 +263,13 @@ def find_recent_sessions(backend: str, limit: int = 20) -> List[Dict[str, Any]]:
     candidates = sessions[: limit * 2]
 
     for s in candidates:
-        raw_summary = get_session_summary(str(s["path"]), backend)
-        if not raw_summary:
+        latest_raw, earliest_raw = get_session_context(str(s["path"]), backend)
+        if not latest_raw:
             continue
 
-        clean_summary = raw_summary.replace("\n", " ").strip()
-        if len(clean_summary) > 50:
-            clean_summary = clean_summary[:47] + "..."
-        s["summary"] = clean_summary
+        s["summary"] = _truncate_snippet(latest_raw, max_len=50)
+        s["latest_summary"] = s["summary"]
+        s["earliest_summary"] = _truncate_snippet(earliest_raw or latest_raw, max_len=50)
         valid_sessions.append(s)
 
         if len(valid_sessions) >= limit:
@@ -183,13 +279,17 @@ def find_recent_sessions(backend: str, limit: int = 20) -> List[Dict[str, Any]]:
 
 
 def format_size(size_bytes: int) -> str:
-    kb = size_bytes / 1024
-    if kb < 100:
-        return f"{kb:2.0f}KB"
-    if kb < 1000:
-        return f"{kb:3.0f}KB"
-    mb = kb / 1024
-    return f"{mb:3.1f}MB"
+    """Format size as fixed-width 7-char SI unit text (e.g. '999.9KB')."""
+    value = size_bytes / 1000.0
+    units = ["KB", "MB", "GB", "TB"]
+    unit_idx = 0
+
+    # Avoid displaying 1000.0 at a lower unit due to rounding.
+    while unit_idx < len(units) - 1 and value >= 999.95:
+        value /= 1000.0
+        unit_idx += 1
+
+    return f"{value:5.1f}{units[unit_idx]}"
 
 
 def get_backend_abbr(backend: str) -> str:
@@ -200,11 +300,53 @@ def get_backend_abbr(backend: str) -> str:
     }.get(backend, backend[:3].upper())
 
 
-def collect_all_sessions(limit_per_backend: int = 50) -> List[Dict[str, Any]]:
+def extract_session_id(path: Path, backend: str) -> str:
+    """Extract backend-normalized human-friendly session id token."""
+    stem = path.stem
+
+    if backend == "claude":
+        # Claude filenames are UUID-like; first chunk is most human-scannable.
+        return stem.split("-")[0]
+
+    if backend == "codex":
+        # rollout-<datetime>-<uid>
+        if stem.startswith("rollout-"):
+            stem = stem[len("rollout-"):]
+        parts = stem.split("-")
+        return parts[-1] if parts else stem
+
+    if backend == "gemini":
+        # session-<datetime>-<uid>
+        if stem.startswith("session-"):
+            stem = stem[len("session-"):]
+        parts = stem.split("-")
+        return parts[-1] if parts else stem
+
+    return stem
+
+
+def assign_display_ids(sessions: List[Dict[str, Any]], max_len: int = 8) -> None:
+    """Assign fixed-width display IDs."""
+    if not sessions:
+        return
+
+    for s in sessions:
+        sid = str(s.get("session_id", ""))
+        if not sid:
+            s["display_id"] = " " * max_len
+            continue
+        s["display_id"] = sid[:max_len].ljust(max_len)
+
+
+def collect_all_sessions(
+    limit_per_backend: int = 50,
+    since_cutoff: Optional[float] = None,
+    requested_backend: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """Aggregate recent sessions from all supported backends."""
     all_sessions = []
-    for backend in SUPPORTED_BACKENDS:
-        sessions = find_recent_sessions(backend, limit=limit_per_backend)
+    for backend in available_backends(requested_backend):
+        sessions = find_recent_sessions(backend, limit=limit_per_backend, since_cutoff=since_cutoff)
         for s in sessions:
             s["backend"] = backend
         all_sessions.extend(sessions)
@@ -214,30 +356,119 @@ def collect_all_sessions(limit_per_backend: int = 50) -> List[Dict[str, Any]]:
     return all_sessions
 
 
-def fzf_select(sessions: List[Dict[str, Any]]) -> Optional[str]:
+def count_session_matches(filepath: str, backend: str, query: str) -> int:
+    """Count case-insensitive query matches in text blocks for ranking."""
+    count, _context = analyze_session_query(filepath, backend, query)
+    return count
+
+
+def rank_sessions(sessions: List[Dict[str, Any]], query: Optional[str] = None) -> List[Dict[str, Any]]:
+    if not query:
+        return sorted(
+            sessions,
+            key=lambda x: (x.get("mtime", 0), str(x.get("path", ""))),
+            reverse=True,
+        )
+
+    ranked: List[Dict[str, Any]] = []
+    for s in sessions:
+        backend = s.get("backend")
+        if not backend:
+            continue
+        match_count, match_context = analyze_session_query(str(s["path"]), backend, query)
+        if match_count > 0:
+            s_copy = dict(s)
+            s_copy["match_count"] = match_count
+            s_copy["match_context"] = match_context or s_copy.get("latest_summary", "")
+            ranked.append(s_copy)
+
+    ranked.sort(
+        key=lambda x: (
+            x.get("match_count", 0),
+            x.get("mtime", 0),
+            str(x.get("path", "")),
+        ),
+        reverse=True,
+    )
+    return ranked
+
+
+def discover_sessions(
+    backend: Optional[str] = None,
+    since_cutoff: Optional[float] = None,
+    query: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    if backend:
+        sessions = find_recent_sessions(backend, since_cutoff=since_cutoff)
+        for s in sessions:
+            s["backend"] = backend
+    else:
+        sessions = collect_all_sessions(since_cutoff=since_cutoff)
+    ranked = rank_sessions(sessions, query)
+    assign_display_ids(ranked, max_len=8)
+    return ranked
+
+
+def emit_sessions_tsv(sessions: List[Dict[str, Any]]) -> None:
+    """Emit script-friendly discovery results to stdout."""
+    print("backend\ttimestamp\tsize_bytes\tsize_display\tmatch_count\tsession_id\tpath\tsummary")
+    for s in sessions:
+        ts = datetime.fromtimestamp(s["mtime"]).strftime("%Y-%m-%d %H:%M:%S")
+        matches = s.get("match_count", 0)
+        sid = str(s.get("display_id", "")).strip()
+        size_display = format_size(int(s.get("size", 0)))
+        summary = str(s.get("summary", "")).replace("\t", " ").replace("\n", " ")
+        print(
+            f"{s.get('backend', '')}\t{ts}\t{s.get('size', 0)}\t{size_display}\t{matches}\t{sid}\t{s.get('path', '')}\t{summary}"
+        )
+
+
+def list_context_columns(session: Dict[str, Any], query_mode: bool) -> Tuple[str, str]:
+    """Return (primary, secondary) context snippets for list rows."""
+    latest = str(session.get("latest_summary") or session.get("summary") or "")
+    earliest = str(session.get("earliest_summary") or latest)
+    if query_mode:
+        primary = latest
+        secondary = str(session.get("match_context") or latest)
+        return primary, secondary
+    return latest, earliest
+
+
+def format_context_column(text: str, width: int = CONTEXT_COL_WIDTH) -> str:
+    return _truncate_snippet(text or "", max_len=width).ljust(width)
+
+
+def fzf_select(sessions: List[Dict[str, Any]], header: str) -> Tuple[Optional[str], str]:
     """Use fzf to select a session from the list."""
     fzf = shutil.which("fzf")
     if not fzf:
-        return None
+        return None, "unavailable"
 
-    # Format lines for fzf: "BKD MM-DD HH:MM SIZE  Summary"
+    # Format lines for fzf:
+    # "BKD MM-DD HH:MM SIZE    HITS ID       Primary Context | Secondary Context"
     lines = []
     map_lines = {}
+    query_mode = any("match_count" in s for s in sessions)
     
     for s in sessions:
         dt = datetime.fromtimestamp(s["mtime"]).strftime("%m-%d %H:%M")
         bk = get_backend_abbr(s['backend'])
         sz = format_size(s['size'])
-        summary = s.get('summary', 'No summary')
+        hits = s.get("match_count", "")
+        hit_text = f"{hits:>3}" if hits != "" else "   "
+        sid = s.get("display_id", " " * 8)
+        primary, secondary = list_context_columns(s, query_mode)
+        primary_col = format_context_column(primary)
+        secondary_col = format_context_column(secondary)
         
-        # "CLD 02-08 14:20  15KB  Summary..."
-        line = f"{bk} {dt} {sz:<5}  {summary}"
+        # "CLD 02-08 14:20 999.9KB  12 abc12345  Primary... | Secondary..."
+        line = f"{bk} {dt} {sz} {hit_text} {sid}  {primary_col} | {secondary_col}"
         lines.append(line)
         map_lines[line] = str(s["path"])
 
     try:
         proc = subprocess.Popen(
-            [fzf, "--no-sort", "--header", "Select a session (most recent first)"],
+            [fzf, "--no-sort", "--header", header],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -247,68 +478,51 @@ def fzf_select(sessions: List[Dict[str, Any]]) -> Optional[str]:
         
         if proc.returncode == 0 and stdout.strip():
             selected = stdout.strip()
-            return map_lines.get(selected)
+            return map_lines.get(selected), "selected"
+        if proc.returncode in (1, 130):
+            return None, "cancelled"
     except Exception:
-        pass
+        return None, "error"
         
-    return None
+    return None, "error"
 
 
-def select_session(backend: Optional[str] = None) -> str:
+def select_session(
+    backend: Optional[str] = None,
+    since_cutoff: Optional[float] = None,
+    query: Optional[str] = None,
+    since_label: str = "1w",
+) -> str:
     """Interactive session selector. 
     
     If backend is provided, limits to that backend.
     Otherwise, aggregates all backends.
     """
-    if backend:
-        sessions = find_recent_sessions(backend)
-        if not sessions:
+    sessions = discover_sessions(backend=backend, since_cutoff=since_cutoff, query=query)
+    if not sessions:
+        if backend:
             print(f"No {backend.title()} sessions found in {get_base_dir(backend)}", file=sys.stderr)
-            sys.exit(1)
-        # Tag them for consistency
-        for s in sessions:
-            s["backend"] = backend
-    else:
-        sessions = collect_all_sessions()
-        if not sessions:
+        elif query:
+            print(f"No sessions matched query: {query!r}", file=sys.stderr)
+        else:
             print("No sessions found in any backend.", file=sys.stderr)
-            sys.exit(1)
-
+        sys.exit(1)
     # Try fzf first
-    path = fzf_select(sessions)
+    horizon = "all-time" if since_cutoff is None else since_label
+    mode_text = "query-ranked" if query else "most recent first"
+    path, fzf_status = fzf_select(sessions, f"Select a session ({mode_text}, since: {horizon})")
     if path:
         return path
+    if fzf_status == "cancelled":
+        sys.exit(0)
+    if fzf_status == "unavailable":
+        print("Error: `fzf` is required for interactive selection but was not found.", file=sys.stderr)
+        print("Hint: install `fzf` or use `--list` for non-interactive discovery.", file=sys.stderr)
+        sys.exit(2)
 
-    # Fallback to simple numeric menu
-    print(f"\nRecent Sessions:", file=sys.stderr)
-    
-    display_limit = 20
-    for i, s in enumerate(sessions[:display_limit]):
-        dt = datetime.fromtimestamp(s["mtime"]).strftime("%m-%d %H:%M")
-        bk = get_backend_abbr(s['backend'])
-        sz = format_size(s['size'])
-        print(f"{i+1:2}. {bk} {dt} {sz:<5}  {s['summary']}", file=sys.stderr)
-
-    while True:
-        try:
-            sys.stderr.write(f"\nSelect session (1-{min(len(sessions), display_limit)}) or 'q' to quit: ")
-            sys.stderr.flush()
-            choice = sys.stdin.readline().strip().lower()
-
-            if choice == "q":
-                sys.exit(0)
-
-            if not choice:
-                continue
-
-            idx = int(choice) - 1
-            if 0 <= idx < len(sessions):
-                return str(sessions[idx]["path"])
-            sys.stderr.write("Invalid number.\n")
-        except ValueError:
-            sys.stderr.write("Please enter a number.\n")
-        except KeyboardInterrupt:
-            sys.exit(0)
+    print("Error: interactive picker failed.", file=sys.stderr)
+    print("Hint: retry, or use `--list` to discover sessions and pass a path explicitly.", file=sys.stderr)
+    sys.exit(1)
 
 
 def render_block(block: Dict[str, Any], mode: str, redactor: Optional[Redactor] = None) -> str:
@@ -504,14 +718,14 @@ def convert(
 
 
 def main() -> None:
-    desc = "Convert Claude or Codex JSONL to Markdown.\n\n"
+    desc = "Convert Claude, Codex, or Gemini session logs to Markdown.\n\n"
     desc += "Run without arguments to select a recent session interactively.\n\n"
     desc += "Modes:\n"
     for m, d in MODE_DESCRIPTIONS.items():
         desc += f"  {m:<10} {d}\n"
 
     parser = argparse.ArgumentParser(description=desc, formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument("input_file", nargs="?", help="Path to input .jsonl file")
+    parser.add_argument("input_file", nargs="?", help="Path to input session file (.jsonl or .json)")
     parser.add_argument("output_file", nargs="?", help="Path to output .md file (optional)")
 
     parser.add_argument(
@@ -521,9 +735,9 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--list-all",
+        "--list",
         action="store_true",
-        help="List recent sessions from all backends (interactive)",
+        help="Print discovered sessions as TSV and exit (non-interactive)",
     )
 
     mode_group = parser.add_mutually_exclusive_group()
@@ -566,6 +780,22 @@ def main() -> None:
         metavar="N",
         help="Show only the first N messages containing text (excludes tool-only turns)",
     )
+    parser.add_argument(
+        "--query",
+        help="Case-insensitive session search query (session-level ranking, full transcript output)",
+    )
+    since_group = parser.add_mutually_exclusive_group()
+    since_group.add_argument(
+        "--since",
+        default="1w",
+        metavar="DURATION",
+        help="List/search horizon (default: 1w). Supports h/d/w (examples: 1d, 1w, 12h).",
+    )
+    since_group.add_argument(
+        "--all-time",
+        action="store_true",
+        help="Disable date horizon for list/search discovery.",
+    )
 
     args = parser.parse_args()
 
@@ -592,12 +822,14 @@ def main() -> None:
 
     backend = args.backend
 
-    if args.list_all:
-        # Force list all backends
-        backend = None
-        args.input_file = None
-
     if args.input_file:
+        if args.list:
+            print("Error: `--list` cannot be used with an input file path.", file=sys.stderr)
+            sys.exit(2)
+        if args.query:
+            print("Warning: `--query` is ignored when an input file path is provided.", file=sys.stderr)
+        if args.all_time or args.since != "1w":
+            print("Warning: `--since`/`--all-time` only affect discovery and are ignored with input file.", file=sys.stderr)
         inferred = infer_backend_from_path(args.input_file)
         # If explicitly set, respect it. If not, use inferred.
         if inferred and not backend:
@@ -605,9 +837,32 @@ def main() -> None:
         # If explicit mismatch, keep explicit (though it might fail parsing)
 
     if not args.input_file:
+        since_cutoff: Optional[float] = None
+        since_label = "all-time"
+        if not args.all_time:
+            try:
+                since_cutoff = parse_since_cutoff(args.since)
+            except ValueError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                sys.exit(2)
+            since_label = args.since
+
+        if args.list:
+            sessions = discover_sessions(backend=backend, since_cutoff=since_cutoff, query=args.query)
+            if not sessions:
+                print("No sessions found for the current filters.", file=sys.stderr)
+                sys.exit(1)
+            emit_sessions_tsv(sessions)
+            sys.exit(0)
+
         if sys.stdin.isatty():
             # If backend is None, select_session will aggregate all
-            args.input_file = select_session(backend)
+            args.input_file = select_session(
+                backend=backend,
+                since_cutoff=since_cutoff,
+                query=args.query,
+                since_label=since_label,
+            )
             # After selection, we must ensure we know the backend for parsing
             if not backend:
                 backend = infer_backend_from_path(args.input_file)
@@ -619,7 +874,8 @@ def main() -> None:
                     # For now, inference is robust enough for standard paths.
                     pass
         else:
-            print("Error: No input file provided and not running interactively.", file=sys.stderr)
+            print("Error: no input file provided and not running interactively.", file=sys.stderr)
+            print("Hint: use `--list` to discover sessions, or run in a TTY for interactive picker.", file=sys.stderr)
             sys.exit(1)
     
     # Final safety check: if we still don't have a backend (e.g. random file provided without --backend)

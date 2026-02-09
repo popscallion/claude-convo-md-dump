@@ -9,7 +9,7 @@ A small CLI that turns Claude, Codex, or Gemini session logs into a single Markd
 
 ## Usage
 
-**Interactive picker (Claude by default)**
+**Interactive picker (all available backends)**
 ```bash
 as-i-was-saying
 ```
@@ -29,6 +29,27 @@ as-i-was-saying -n 5
 
 # Show the first 2 messages
 as-i-was-saying --head 2
+```
+
+**Session Discovery Search (MVP)**
+Search ranks sessions (not turns) and always outputs full transcripts.
+Default horizon is the last week; use `--since 1d` for speed or `--all-time` for comprehensive search.
+List rows now include two context snippets:
+- without `--query`: latest user snippet + earliest user snippet
+- with `--query`: latest user snippet + match-context snippet
+Both context columns are fixed-width (40 chars) for alignment (truncate with ellipsis, pad if shorter).
+```bash
+# Search sessions (case-insensitive) across available backends
+as-i-was-saying --query auth
+
+# Faster horizon
+as-i-was-saying --query auth --since 1d
+
+# Comprehensive horizon
+as-i-was-saying --query auth --all-time
+
+# Script-friendly discovery (TSV output, no picker)
+as-i-was-saying --query auth --list
 ```
 
 ## Install to PATH (optional)
@@ -59,6 +80,8 @@ as-i-was-saying --backend gemini ~/.gemini/tmp/.../chats/session-...json
 ```
 
 If you pass a file path under `~/.codex/sessions`, `~/.claude/projects`, or `~/.gemini/tmp`, the tool will infer the backend automatically.
+When running the interactive picker without `--backend`, the tool self-discovers which implemented backends are present on the system and skips missing ones.
+Interactive selection requires `fzf`. If unavailable, use `--list` for non-interactive discovery.
 
 ## Modes
 
@@ -160,16 +183,134 @@ Inspired by [simonw/claude-code-transcripts](https://github.com/simonw/claude-co
 
 ## Roadmap (v2)
 
-The current version (v0.2.0) focuses on robust parsing and simple recent-session discovery. Future versions aims to improve retrieval:
+The current version (v0.2.x) focuses on robust parsing plus session-level retrieval. Future versions aim to improve retrieval depth:
 
-- **Unified Search**: Search across all backends simultaneously.
-- **Content Search**: Fuzzy finding within conversation content (not just summaries).
+- **Unified Search**: Search across all available implemented backends (current default for interactive picker).
 - **Turn-based Retrieval**: Ability to extract specific turns rather than full sessions.
-- **Date Filtering**: Scoped searches (e.g., `--since 2d`).
+- **Expanded Filtering**: Additional scoped date/window options if needed beyond `--since` and `--all-time`.
+- **Optional Ranking Enhancements**: Keep deterministic ranking first; only add weighted ranking if clearly needed.
 
 **Implementation Notes:**
-- The current backend-agnostic architecture (`backends.py`) makes adding new sources (like OpenAI or local LLMs) straightforward.
-- Performance: Standard `rg` and `fzf` integration is preferred over building a custom indexing database for now.
+- The parser/renderer remains backend-normalized (`backends.py`) with one renderer.
+- Discovery is scan-per-run by design (no persistent index yet) to avoid cache invalidation complexity.
+- Ranking is deterministic (match count, then recency), favoring explainability.
+
+### Query UX Roadmap (Staged, User-Test-Gated)
+
+This roadmap is intentionally iterative. After each stage, stop and run manual UX testing before proceeding.
+
+#### Stage 1: Two Stable Context Columns (Low Complexity)
+
+Goal:
+- Keep list layout stable while improving row informativeness.
+
+Behavior:
+- Always show two context columns.
+- Without `--query`:
+  - Primary context: latest user snippet.
+  - Secondary context: earliest user snippet.
+- With `--query`:
+  - Primary context: match-context snippet.
+  - Secondary context: latest user snippet.
+
+Choice points:
+1. Match-context source:
+  - First hit in session.
+  - Best local hit (denser nearby matches).
+2. Snippet width:
+  - Shorter (less truncation noise, less detail).
+  - Longer (more detail, higher row width pressure).
+
+Pros:
+- Minimal architecture change.
+- Better disambiguation with predictable row layout.
+
+Cons:
+- Still row-constrained; may not explain every match clearly.
+
+Manual checkpoint:
+```bash
+as-i-was-saying --query auth
+as-i-was-saying
+```
+Evaluate:
+- Can you select confidently from rows alone?
+- Does row width feel crowded on your terminal?
+
+#### Stage 2: Query-Mode Preview Pane with Caching (Medium Complexity)
+
+Goal:
+- Show richer "why this matched" evidence without leaving the list.
+
+Behavior:
+- Keep Stage 1 rows.
+- In query mode, show a preview pane with top match excerpts (for highlighted row).
+- Compute preview lazily on row focus and cache by session.
+
+Choice points:
+1. Preview trigger:
+  - Query mode only (recommended initially).
+  - Always on.
+2. Preview content:
+  - Top 2-3 hits only.
+  - Top hits + extra metadata.
+3. Loading strategy:
+  - Lazy + cache (faster first paint, possible per-row delay).
+  - Eager precompute (slower initial load, smoother navigation).
+
+Pros:
+- Better evidence density with minimal list clutter.
+- Preserves current select flow.
+
+Cons:
+- Added moving parts (preview rendering + caching).
+- Potential per-row latency if lazy and uncached.
+
+Manual checkpoint:
+```bash
+as-i-was-saying --query auth
+```
+Evaluate:
+- Time to first actionable list.
+- Smoothness while moving selection.
+- Whether preview resolves ambiguity enough to avoid second-stage flow.
+
+#### Stage 3: Optional Chained Inspect Flow (Higher Complexity)
+
+Goal:
+- Allow deeper match inspection before committing to a session.
+
+Behavior:
+- First list selects candidate session.
+- Optional second-stage inspect view lists in-session matches/contexts.
+- User can confirm, back out, or choose another match/session.
+
+Choice points:
+1. Activation:
+  - Separate flag/mode (recommended).
+  - Default in query mode.
+2. Inspect granularity:
+  - Match snippets only.
+  - Match snippets + turn boundaries.
+3. Exit behavior:
+  - Return to first list on cancel.
+  - Exit command on cancel.
+
+Pros:
+- Highest precision for ambiguous query results.
+
+Cons:
+- Most UX and state complexity.
+- More keyflow/docs/testing overhead.
+
+Manual checkpoint:
+- Compare Stage 2 vs Stage 3 on:
+  - selection confidence
+  - speed to target session
+  - cognitive overhead
+
+Decision rule:
+- Only proceed to Stage 3 if Stage 2 still leaves frequent ambiguity.
 
 ## License
 

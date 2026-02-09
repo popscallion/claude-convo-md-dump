@@ -10,7 +10,7 @@ resolution-markers = [
 
 [[package]]
 name = "as-i-was-saying"
-version = "0.2.0"
+version = "0.2.3"
 source = { editable = "." }
 
 [package.optional-dependencies]

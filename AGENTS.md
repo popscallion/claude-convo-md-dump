@@ -26,6 +26,15 @@ This file defines development rules and architectural choices for this repo. It 
   - Claude is default.
   - Codex is selected with `--backend codex`.
   - Backend inference from file paths is allowed but explicit flags are preferred in docs and tests.
+- Discovery and retrieval:
+  - Interactive discovery is unified across available implemented backends by default.
+  - Interactive discovery requires `fzf`.
+  - Backend presence is self-discovered on each run (no required setup/config file).
+  - Missing backend storage roots are skipped silently in unified discovery.
+  - MVP retrieval remains session-level (full transcript output), not turn-level extraction.
+  - Date horizon is supported for discovery/search (`--since`, `--all-time`).
+  - Search ranking is deterministic: match count, then recency.
+  - Scan-per-run is preferred for now; avoid persistent indexing/caching in MVP.
 - Normalization rules:
   - Claude events map from `user`/`assistant` message blocks.
   - Codex events map from `response_item` and `event_msg` lines.
@@ -72,6 +81,10 @@ This file defines development rules and architectural choices for this repo. It 
   - Update fixtures and expected outputs.
   - Update `README.md` for user-facing effects.
   - Update this file for architectural or workflow changes.
+- For interaction-heavy UX changes (list/search/selection flows):
+  - Implement in small stages.
+  - Stop after each stage for manual UX validation.
+  - Explicitly document decision points and tradeoffs before advancing complexity.
 
 ## Session Handoff
 
