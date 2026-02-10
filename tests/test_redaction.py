@@ -36,3 +36,20 @@ def test_redact_recursive_structures():
     out = r.redact(obj)
     assert "EMAIL-" in out["a"][0]
     assert "/Users/USER" in out["a"][1]["k"]
+
+
+def test_redact_stable_tokens_reuse_same_mapping():
+    r = Redactor()
+    out = r.redact_string("bob@example.com and bob@example.com")
+    tokens = [part for part in out.split() if part.startswith("EMAIL-")]
+    assert len(tokens) == 2
+    assert tokens[0] == tokens[1]
+
+
+def test_redact_url_userinfo_and_ip_and_domain_file_extension():
+    r = Redactor(strict=False)
+    out = r.redact_string("https://alice@127.0.0.1:8443/x 127.0.0.1 readme.md")
+    assert "USERINFO@" in out
+    assert "HOST-" in out
+    assert "IP-" in out
+    assert "readme.md" in out

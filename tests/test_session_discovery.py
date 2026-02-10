@@ -160,3 +160,24 @@ def test_format_context_column_fixed_width():
     assert short == "abc     "
     long = app.format_context_column("abcdefghijk", width=8)
     assert len(long) == 8
+
+
+def test_session_id_for_path_codex_falls_back_to_filename_uuid(tmp_path):
+    session = tmp_path / "rollout-2026-02-10T10-15-39-019d34ab-1234-5678-abcd-1234567890ef.jsonl"
+    session.write_text('{"type":"user","message":{"content":"x"}}\n', encoding="utf-8")
+    sid = app.session_id_for_path(str(session), "codex")
+    assert sid == "019d34ab-1234-5678-abcd-1234567890ef"
+
+
+def test_session_id_for_path_gemini_falls_back_to_stem_when_no_uuid(tmp_path):
+    session = tmp_path / "session-2026-02-10T10-15-39-abc12345.json"
+    session.write_text("{}", encoding="utf-8")
+    sid = app.session_id_for_path(str(session), "gemini")
+    assert sid == "2026-02-10T10-15-39-abc12345"
+
+
+def test_session_id_for_path_claude_agent_prefix_fallback(tmp_path):
+    session = tmp_path / "agent-xyz123.jsonl"
+    session.write_text("", encoding="utf-8")
+    sid = app.session_id_for_path(str(session), "claude")
+    assert sid == "xyz123"

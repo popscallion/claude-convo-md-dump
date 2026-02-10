@@ -90,3 +90,97 @@ def test_normalize_event_dispatch_default_claude():
     }
     events = backends.normalize_event(raw, "unknown-backend")
     assert events[0]["role"] == "assistant"
+
+
+def test_codex_normalize_session_meta_and_turn_context():
+    session_meta = {
+        "type": "session_meta",
+        "payload": {"id": "abc", "timestamp": "p-ts"},
+    }
+    turn_context = {
+        "type": "turn_context",
+        "timestamp": "row-ts",
+        "payload": {"turn": 2},
+    }
+    meta_events = backends.normalize_codex_event(session_meta)
+    ctx_events = backends.normalize_codex_event(turn_context)
+
+    assert meta_events[0]["role"] == "meta"
+    assert meta_events[0]["timestamp"] == "p-ts"
+    assert meta_events[0]["blocks"][0]["label"] == "Session Meta"
+    assert ctx_events[0]["blocks"][0]["label"] == "Turn Context"
+
+
+def test_codex_event_msg_variants_map_expected_roles():
+    user_events = backends.normalize_codex_event(
+        {"type": "event_msg", "timestamp": "t", "payload": {"type": "user_message", "text": "u"}}
+    )
+    reasoning_events = backends.normalize_codex_event(
+        {"type": "event_msg", "timestamp": "t", "payload": {"type": "agent_reasoning", "message": "r"}}
+    )
+    token_events = backends.normalize_codex_event(
+        {"type": "event_msg", "timestamp": "t", "payload": {"type": "token_count", "in": 1}}
+    )
+
+    assert user_events[0]["role"] == "user"
+    assert reasoning_events[0]["blocks"][0]["type"] == "thinking"
+    assert token_events[0]["blocks"][0]["type"] == "meta"
+    assert token_events[0]["blocks"][0]["label"] == "Token Count"
+
+
+def test_codex_message_with_role_and_invalid_content_shapes():
+    role_message = {
+        "type": "response_item",
+        "timestamp": "t",
+        "payload": {"type": "message", "role": "assistant", "content": [{"text": "only assistant"}]},
+    }
+    invalid_message = {
+        "type": "response_item",
+        "timestamp": "t",
+        "payload": {"type": "message", "content": "not-a-list"},
+    }
+
+    role_events = backends.normalize_codex_event(role_message)
+    invalid_events = backends.normalize_codex_event(invalid_message)
+
+    assert role_events == [
+        {
+            "role": "assistant",
+            "timestamp": "t",
+            "blocks": [{"type": "text", "text": "only assistant"}],
+        }
+    ]
+    assert invalid_events == []
+
+
+def test_codex_function_call_output_and_reasoning_summary_list():
+    output_raw = {
+        "type": "response_item",
+        "timestamp": "t",
+        "payload": {"type": "function_call_output", "output": {"ok": True}},
+    }
+    reasoning_raw = {
+        "type": "response_item",
+        "timestamp": "t",
+        "payload": {"type": "reasoning", "summary": [{"text": "first"}, {"x": 1}]},
+    }
+    output_events = backends.normalize_codex_event(output_raw)
+    reasoning_events = backends.normalize_codex_event(reasoning_raw)
+
+    assert output_events[0]["blocks"][0]["type"] == "tool_result"
+    assert output_events[0]["blocks"][0]["content"] == {"ok": True}
+    assert "first" in reasoning_events[0]["blocks"][0]["thinking"]
+
+
+def test_gemini_user_error_and_info_paths():
+    user = {"type": "user", "timestamp": "t", "content": "prompt"}
+    error = {"type": "error", "timestamp": "t", "content": "bad"}
+    info = {"type": "info", "timestamp": "t", "content": "note"}
+
+    user_events = backends.normalize_gemini_event(user)
+    error_events = backends.normalize_gemini_event(error)
+    info_events = backends.normalize_gemini_event(info)
+
+    assert user_events[0]["role"] == "user"
+    assert error_events[0]["blocks"][0]["label"] == "Error"
+    assert info_events[0]["blocks"][0]["label"] == "Info"
