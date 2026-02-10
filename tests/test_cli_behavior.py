@@ -61,3 +61,48 @@ def test_main_no_input_non_tty_shows_hint(monkeypatch, capsys):
         app.main()
     assert exc.value.code == 1
     assert "--list" in capsys.readouterr().err
+
+
+def test_main_emit_path_with_input_file(monkeypatch, capsys, tmp_path):
+    session = tmp_path / "s.jsonl"
+    session.write_text('{"type":"user","message":{"content":"u"}}\n', encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["as_i_was_saying.py", str(session), "--emit", "path"])
+    with pytest.raises(SystemExit) as exc:
+        app.main()
+    assert exc.value.code == 0
+    assert capsys.readouterr().out.strip() == str(session)
+
+
+def test_main_emit_id_with_input_file(monkeypatch, capsys, tmp_path):
+    session = tmp_path / "rollout-2026-02-09T15-10-02-019c4406-8031-7130-a1ab-657bc80bb228.jsonl"
+    session.write_text(
+        '{"type":"session_meta","payload":{"id":"019c4406-8031-7130-a1ab-657bc80bb228"}}\n'
+        '{"type":"user","message":{"content":"u"}}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["as_i_was_saying.py", str(session), "--backend", "codex", "--emit", "id"],
+    )
+    with pytest.raises(SystemExit) as exc:
+        app.main()
+    assert exc.value.code == 0
+    assert capsys.readouterr().out.strip() == "019c4406-8031-7130-a1ab-657bc80bb228"
+
+
+def test_main_emit_id_with_gemini_uses_session_id(monkeypatch, capsys, tmp_path):
+    session = tmp_path / "session-2026-02-09T20-05-813001ce.json"
+    session.write_text(
+        '{"sessionId":"3ebe0729-869b-4760-9151-d5abf44957c6","messages":[]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["as_i_was_saying.py", str(session), "--backend", "gemini", "--emit", "id"],
+    )
+    with pytest.raises(SystemExit) as exc:
+        app.main()
+    assert exc.value.code == 0
+    assert capsys.readouterr().out.strip() == "3ebe0729-869b-4760-9151-d5abf44957c6"

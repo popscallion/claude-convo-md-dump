@@ -325,6 +325,64 @@ def extract_session_id(path: Path, backend: str) -> str:
     return stem
 
 
+def session_id_for_path(path: str, backend: Optional[str] = None) -> str:
+    """Best-effort full backend-native session id extraction for emit mode."""
+    p = Path(path)
+    inferred = backend or infer_backend_from_path(path)
+    stem = p.stem
+
+    if inferred == "codex":
+        # Prefer explicit id from session metadata if present.
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    row = json.loads(line)
+                    if row.get("type") == "session_meta":
+                        payload = row.get("payload", {})
+                        sid = payload.get("id")
+                        if isinstance(sid, str) and sid:
+                            return sid
+                        break
+        except Exception:
+            pass
+
+        match = re.search(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", stem)
+        if match:
+            return match.group(0)
+
+    if inferred == "gemini":
+        # Prefer full sessionId from JSON payload when available.
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                sid = data.get("sessionId")
+                if isinstance(sid, str) and sid:
+                    return sid
+        except Exception:
+            pass
+
+        match = re.search(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", stem)
+        if match:
+            return match.group(0)
+
+    if inferred == "claude":
+        match = re.search(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", stem)
+        if match:
+            return match.group(0)
+        if stem.startswith("agent-"):
+            return stem[len("agent-"):]
+        return stem
+
+    stem = p.stem
+    for prefix in ("session-", "rollout-", "agent-"):
+        if stem.startswith(prefix):
+            stem = stem[len(prefix):]
+            break
+    return stem
+
+
 def assign_display_ids(sessions: List[Dict[str, Any]], max_len: int = 8) -> None:
     """Assign fixed-width display IDs."""
     if not sessions:
@@ -739,6 +797,11 @@ def main() -> None:
         action="store_true",
         help="Print discovered sessions as TSV and exit (non-interactive)",
     )
+    parser.add_argument(
+        "--emit",
+        choices=["path", "id"],
+        help="Emit only selected/provided session path or id and exit.",
+    )
 
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument(
@@ -848,6 +911,8 @@ def main() -> None:
             since_label = args.since
 
         if args.list:
+            if args.emit:
+                print("Warning: `--emit` is ignored with `--list`.", file=sys.stderr)
             sessions = discover_sessions(backend=backend, since_cutoff=since_cutoff, query=args.query)
             if not sessions:
                 print("No sessions found for the current filters.", file=sys.stderr)
@@ -877,6 +942,13 @@ def main() -> None:
             print("Error: no input file provided and not running interactively.", file=sys.stderr)
             print("Hint: use `--list` to discover sessions, or run in a TTY for interactive picker.", file=sys.stderr)
             sys.exit(1)
+
+    if args.emit:
+        if args.emit == "path":
+            print(args.input_file)
+        else:
+            print(session_id_for_path(args.input_file, backend))
+        sys.exit(0)
     
     # Final safety check: if we still don't have a backend (e.g. random file provided without --backend)
     # Default to claude? Or try to sniff? 

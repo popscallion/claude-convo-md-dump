@@ -20,6 +20,15 @@ as-i-was-saying path/to/session.jsonl
 as-i-was-saying path/to/session.jsonl output.md
 ```
 
+**Emit session reference only**
+```bash
+# Emit selected/provided path only
+as-i-was-saying --emit path
+
+# Emit selected/provided backend-native session id only
+as-i-was-saying --emit id
+```
+
 **Filter Output**
 Limit to the most recent messages (`-n` / `--tail`) or the first messages (`--head`).
 Note: These flags count messages containing text, ignoring tool-only turns.
@@ -198,6 +207,10 @@ The current version (v0.2.x) focuses on robust parsing plus session-level retrie
 ### Query UX Roadmap (Staged, User-Test-Gated)
 
 This roadmap is intentionally iterative. After each stage, stop and run manual UX testing before proceeding.
+
+Current decision:
+- We tested a Stage 2 preview-pane direction and rolled it back for now.
+- We are intentionally staying at Stage 1 unless we later commit to a fuller TUI/inspect workflow.
 
 #### Stage 1: Two Stable Context Columns (Low Complexity)
 
