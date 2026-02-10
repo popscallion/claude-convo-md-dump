@@ -29,6 +29,27 @@ as-i-was-saying --emit path
 as-i-was-saying --emit id
 ```
 
+**Chaining Examples**
+```bash
+# Copy transcript to macOS clipboard
+as-i-was-saying path/to/session.jsonl | pbcopy
+
+# Copy transcript to Wayland clipboard (Linux)
+as-i-was-saying path/to/session.jsonl | wl-copy
+
+# Copy transcript to X11 clipboard (Linux)
+as-i-was-saying path/to/session.jsonl | xclip -selection clipboard
+
+# Pick a session via TSV + external fzf, then render it
+as-i-was-saying --list | fzf | cut -f7 | xargs -I{} as-i-was-saying "{}"
+
+# In-conversation fuzzy filtering after rendering
+as-i-was-saying path/to/session.jsonl | fzf
+
+# Emit Gemini session id and resume in Gemini CLI
+as-i-was-saying --backend gemini --emit id | xargs -I{} gemini --resume {}
+```
+
 **Filter Output**
 Limit to the most recent messages (`-n` / `--tail`) or the first messages (`--head`).
 Note: These flags count messages containing text, ignoring tool-only turns.
