@@ -859,6 +859,11 @@ def main() -> None:
         action="store_true",
         help="Disable date horizon for list/search discovery.",
     )
+    parser.add_argument(
+        "-l", "--latest",
+        action="store_true",
+        help="Select the most recent session automatically (respects filters).",
+    )
 
     args = parser.parse_args()
 
@@ -889,58 +894,107 @@ def main() -> None:
         if args.list:
             print("Error: `--list` cannot be used with an input file path.", file=sys.stderr)
             sys.exit(2)
+        if args.latest:
+            print("Error: `--latest` cannot be used with an input file path.", file=sys.stderr)
+            sys.exit(2)
         if args.query:
             print("Warning: `--query` is ignored when an input file path is provided.", file=sys.stderr)
         if args.all_time or args.since != "1w":
-            print("Warning: `--since`/`--all-time` only affect discovery and are ignored with input file.", file=sys.stderr)
+            # If the user provided a file path, we typically ignore --since. 
+            # BUT if we are falling back to ID lookup, we might need it.
+            # We'll defer the warning until we know if it's a file or ID.
+            pass
+
         inferred = infer_backend_from_path(args.input_file)
-        # If explicitly set, respect it. If not, use inferred.
         if inferred and not backend:
             backend = inferred
-        # If explicit mismatch, keep explicit (though it might fail parsing)
 
-    if not args.input_file:
-        since_cutoff: Optional[float] = None
-        since_label = "all-time"
-        if not args.all_time:
-            try:
-                since_cutoff = parse_since_cutoff(args.since)
-            except ValueError as e:
-                print(f"Error: {e}", file=sys.stderr)
-                sys.exit(2)
-            since_label = args.since
+    # Parse horizon
+    since_cutoff: Optional[float] = None
+    since_label = "all-time"
+    if not args.all_time:
+        try:
+            since_cutoff = parse_since_cutoff(args.since)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(2)
+        since_label = args.since
 
-        if args.list:
-            if args.emit:
-                print("Warning: `--emit` is ignored with `--list`.", file=sys.stderr)
-            sessions = discover_sessions(backend=backend, since_cutoff=since_cutoff, query=args.query)
-            if not sessions:
-                print("No sessions found for the current filters.", file=sys.stderr)
+    # Handle List Mode
+    if args.list:
+        if args.emit:
+            print("Warning: `--emit` is ignored with `--list`.", file=sys.stderr)
+        sessions = discover_sessions(backend=backend, since_cutoff=since_cutoff, query=args.query)
+        if not sessions:
+            print("No sessions found for the current filters.", file=sys.stderr)
+            sys.exit(1)
+        emit_sessions_tsv(sessions)
+        sys.exit(0)
+
+    # Handle Latest Mode
+    if args.latest:
+        sessions = discover_sessions(backend=backend, since_cutoff=since_cutoff, query=args.query)
+        if not sessions:
+            print("No sessions found to select latest from.", file=sys.stderr)
+            sys.exit(1)
+        # discover_sessions returns sorted by mtime descending (and match rank)
+        args.input_file = str(sessions[0]["path"])
+        if not backend:
+            backend = sessions[0].get("backend")
+
+    # Handle Input Resolution (File vs ID)
+    if args.input_file:
+        if not os.path.exists(args.input_file):
+            # Attempt ID resolution
+            # We scan for sessions and look for a match on session_id
+            target_id = args.input_file.strip()
+            
+            # If the user specified a specific horizon, respect it.
+            # If they didn't (default 1w), and the file isn't found, 
+            # arguably we should look wider? For now, sticking to explicit/default horizon 
+            # ensures "scan-per-run" performance is predictable.
+            
+            sessions = discover_sessions(backend=backend, since_cutoff=since_cutoff)
+            matches = []
+            for s in sessions:
+                sid = str(s.get("session_id", ""))
+                if sid == target_id:
+                    matches.append(s)
+                elif sid.startswith(target_id): # Prefix match
+                    matches.append(s)
+            
+            if len(matches) == 1:
+                args.input_file = str(matches[0]["path"])
+                if not backend:
+                    backend = matches[0].get("backend")
+            elif len(matches) > 1:
+                # Prioritize exact match
+                exact = [m for m in matches if str(m.get("session_id", "")) == target_id]
+                if len(exact) == 1:
+                    args.input_file = str(exact[0]["path"])
+                    if not backend:
+                        backend = exact[0].get("backend")
+                else:
+                    print(f"Error: Ambiguous ID '{target_id}'. Matched {len(matches)} sessions.", file=sys.stderr)
+                    sys.exit(1)
+            else:
+                print(f"Error: File not found and no session matched ID '{target_id}' (horizon: {since_label}).", file=sys.stderr)
                 sys.exit(1)
-            emit_sessions_tsv(sessions)
-            sys.exit(0)
 
+    # Interactive Picker Fallback
+    if not args.input_file:
         if sys.stdin.isatty():
-            # If backend is None, select_session will aggregate all
             args.input_file = select_session(
                 backend=backend,
                 since_cutoff=since_cutoff,
                 query=args.query,
                 since_label=since_label,
             )
-            # After selection, we must ensure we know the backend for parsing
             if not backend:
                 backend = infer_backend_from_path(args.input_file)
-                # Fallback if inference fails (unlikely for known paths)
-                if not backend:
-                    # Try to guess or error out? 
-                    # Actually, normalize_event needs a backend.
-                    # Let's assume standard paths for now or check file content type?
-                    # For now, inference is robust enough for standard paths.
-                    pass
         else:
             print("Error: no input file provided and not running interactively.", file=sys.stderr)
-            print("Hint: use `--list` to discover sessions, or run in a TTY for interactive picker.", file=sys.stderr)
+            print("Hint: use `--list` or `--latest`, or run in a TTY.", file=sys.stderr)
             sys.exit(1)
 
     if args.emit:

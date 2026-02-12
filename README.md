@@ -61,6 +61,18 @@ as-i-was-saying -n 5
 as-i-was-saying --head 2
 ```
 
+**Quickly render the most recent session**
+```bash
+as-i-was-saying --latest
+as-i-was-saying -l
+```
+
+**Select by Session ID**
+If the input is not a file, it is treated as a session ID (exact or prefix match).
+```bash
+as-i-was-saying 5a3b2c
+```
+
 **Session Discovery Search**
 Search ranks sessions (not turns) and always outputs full transcripts.
 Default horizon is the last week; use `--since 1d` for faster scans or `--all-time` for comprehensive scans.

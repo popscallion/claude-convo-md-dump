@@ -22,6 +22,9 @@ README_EXAMPLE_CASES = {
     "as-i-was-saying --backend gemini --emit id | xargs -I{} gemini --resume {}": "emit_gemini_id",
     "as-i-was-saying -n 5": "tail",
     "as-i-was-saying --head 2": "head",
+    "as-i-was-saying --latest": "latest",
+    "as-i-was-saying -l": "latest_short",
+    "as-i-was-saying 5a3b2c": "id_lookup",
     "as-i-was-saying --query auth": "query_interactive",
     "as-i-was-saying --query auth --since 1d": "query_interactive_since",
     "as-i-was-saying --query auth --all-time": "query_interactive_all_time",
@@ -200,6 +203,38 @@ def test_readme_example_case_behaviors(command, case, monkeypatch, tmp_path, cap
         out = capsys.readouterr().out
         assert "first" in out
         assert "second" not in out
+        return
+
+    if case in {"latest", "latest_short"}:
+        monkeypatch.setattr(
+            app,
+            "discover_sessions",
+            lambda **_kwargs: [{"path": str(claude), "mtime": 100, "backend": "claude"}],
+        )
+        flag = "--latest" if case == "latest" else "-l"
+        assert _run_main(monkeypatch, [flag]) == 0
+        assert "# Transcript:" in capsys.readouterr().out
+        return
+
+    if case == "id_lookup":
+        monkeypatch.setattr(
+            app,
+            "discover_sessions",
+            lambda **_kwargs: [
+                {
+                    "path": str(claude),
+                    "session_id": "5a3b2c-full-id",
+                    "backend": "claude",
+                }
+            ],
+        )
+        
+        def fake_exists(path):
+            return str(path) != "5a3b2c"
+
+        monkeypatch.setattr(app.os.path, "exists", fake_exists)
+        assert _run_main(monkeypatch, ["5a3b2c"]) == 0
+        assert "# Transcript:" in capsys.readouterr().out
         return
 
     if case in {"query_interactive", "query_interactive_since", "query_interactive_all_time"}:
