@@ -467,6 +467,123 @@ def discover_sessions(
     return ranked
 
 
+def scan_sessions_for_resolution(
+    backend: Optional[str] = None,
+    since_cutoff: Optional[float] = None,
+) -> List[Dict[str, Any]]:
+    """Scan session files for non-interactive selectors (--id/--latest)."""
+    sessions: List[Dict[str, Any]] = []
+    backends = available_backends(backend)
+
+    for b in backends:
+        base_dir = get_base_dir(b)
+        if not base_dir.exists():
+            continue
+
+        if b == "gemini":
+            try:
+                project_dirs = [entry for entry in base_dir.iterdir() if entry.is_dir()]
+            except OSError:
+                project_dirs = []
+
+            for p_dir in project_dirs:
+                chats_dir = p_dir / "chats"
+                if not chats_dir.exists():
+                    continue
+                for path in chats_dir.glob("session-*.json"):
+                    try:
+                        stat = path.stat()
+                    except OSError:
+                        continue
+                    if since_cutoff is not None and stat.st_mtime < since_cutoff:
+                        continue
+                    sessions.append(
+                        {
+                            "backend": b,
+                            "path": path,
+                            "mtime": stat.st_mtime,
+                            "size": stat.st_size,
+                            "session_id": extract_session_id(path, b),
+                            "full_session_id": session_id_for_path(str(path), b),
+                        }
+                    )
+        else:
+            for path in base_dir.rglob("*.jsonl"):
+                if b == "claude" and "agent-" in path.name:
+                    continue
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                if since_cutoff is not None and stat.st_mtime < since_cutoff:
+                    continue
+                sessions.append(
+                    {
+                        "backend": b,
+                        "path": path,
+                        "mtime": stat.st_mtime,
+                        "size": stat.st_size,
+                        "session_id": extract_session_id(path, b),
+                        "full_session_id": session_id_for_path(str(path), b),
+                    }
+                )
+
+    sessions.sort(
+        key=lambda s: (s.get("mtime", 0), str(s.get("path", ""))),
+        reverse=True,
+    )
+    return sessions
+
+
+def resolve_session_by_id(
+    target_id: str,
+    backend: Optional[str] = None,
+    since_cutoff: Optional[float] = None,
+    min_prefix_len: int = 6,
+) -> Dict[str, Any]:
+    """Resolve session ID (exact, then unique prefix) for non-interactive usage."""
+    target = target_id.strip()
+    if not target:
+        raise ValueError("Session ID cannot be empty.")
+
+    sessions = scan_sessions_for_resolution(backend=backend, since_cutoff=since_cutoff)
+    if not sessions:
+        raise ValueError("No sessions found for the current filters.")
+
+    def _is_exact_match(session: Dict[str, Any]) -> bool:
+        return target in {
+            str(session.get("full_session_id", "")),
+            str(session.get("session_id", "")),
+        }
+
+    exact_matches = [s for s in sessions if _is_exact_match(s)]
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+    if len(exact_matches) > 1:
+        raise ValueError(f"Ambiguous ID '{target}'. Matched {len(exact_matches)} sessions.")
+
+    if len(target) < min_prefix_len:
+        raise ValueError(
+            "No exact match found for '{0}'. Prefix lookups require at least {1} characters.".format(
+                target,
+                min_prefix_len,
+            )
+        )
+
+    def _is_prefix_match(session: Dict[str, Any]) -> bool:
+        full_id = str(session.get("full_session_id", ""))
+        short_id = str(session.get("session_id", ""))
+        return full_id.startswith(target) or short_id.startswith(target)
+
+    prefix_matches = [s for s in sessions if _is_prefix_match(s)]
+    if len(prefix_matches) == 1:
+        return prefix_matches[0]
+    if len(prefix_matches) > 1:
+        raise ValueError(f"Ambiguous ID prefix '{target}'. Matched {len(prefix_matches)} sessions.")
+
+    raise ValueError("No session matched ID '{0}'.".format(target))
+
+
 def emit_sessions_tsv(sessions: List[Dict[str, Any]]) -> None:
     """Emit script-friendly discovery results to stdout."""
     print("backend\ttimestamp\tsize_bytes\tsize_display\tmatch_count\tsession_id\tpath\tsummary")
@@ -860,9 +977,14 @@ def main() -> None:
         help="Disable date horizon for list/search discovery.",
     )
     parser.add_argument(
+        "--id",
+        metavar="SESSION_ID",
+        help="Select session by ID (exact or unique prefix) and render non-interactively.",
+    )
+    parser.add_argument(
         "-l", "--latest",
         action="store_true",
-        help="Select the most recent session automatically (respects filters).",
+        help="Select the most recent discovered session automatically (respects filters).",
     )
 
     args = parser.parse_args()
@@ -890,9 +1012,22 @@ def main() -> None:
 
     backend = args.backend
 
+    if args.list and args.id:
+        print("Error: `--list` cannot be used with `--id`.", file=sys.stderr)
+        sys.exit(2)
+    if args.list and args.latest:
+        print("Error: `--list` cannot be used with `--latest`.", file=sys.stderr)
+        sys.exit(2)
+    if args.id and args.latest:
+        print("Error: `--id` cannot be used with `--latest`.", file=sys.stderr)
+        sys.exit(2)
+
     if args.input_file:
         if args.list:
             print("Error: `--list` cannot be used with an input file path.", file=sys.stderr)
+            sys.exit(2)
+        if args.id:
+            print("Error: `--id` cannot be used with an input file path.", file=sys.stderr)
             sys.exit(2)
         if args.latest:
             print("Error: `--latest` cannot be used with an input file path.", file=sys.stderr)
@@ -900,19 +1035,20 @@ def main() -> None:
         if args.query:
             print("Warning: `--query` is ignored when an input file path is provided.", file=sys.stderr)
         if args.all_time or args.since != "1w":
-            # If the user provided a file path, we typically ignore --since. 
-            # BUT if we are falling back to ID lookup, we might need it.
-            # We'll defer the warning until we know if it's a file or ID.
-            pass
-
+            print("Warning: `--since`/`--all-time` only affect discovery and are ignored with input file.", file=sys.stderr)
         inferred = infer_backend_from_path(args.input_file)
+        # If explicitly set, respect it. If not, use inferred.
         if inferred and not backend:
             backend = inferred
+        # If explicit mismatch, keep explicit (though it might fail parsing)
 
-    # Parse horizon
+    if args.id and args.query:
+        print("Warning: `--query` is ignored with `--id`.", file=sys.stderr)
+
+    needs_discovery = args.list or args.latest or bool(args.id) or not args.input_file
     since_cutoff: Optional[float] = None
     since_label = "all-time"
-    if not args.all_time:
+    if needs_discovery and not args.all_time:
         try:
             since_cutoff = parse_since_cutoff(args.since)
         except ValueError as e:
@@ -920,7 +1056,6 @@ def main() -> None:
             sys.exit(2)
         since_label = args.since
 
-    # Handle List Mode
     if args.list:
         if args.emit:
             print("Warning: `--emit` is ignored with `--list`.", file=sys.stderr)
@@ -931,70 +1066,47 @@ def main() -> None:
         emit_sessions_tsv(sessions)
         sys.exit(0)
 
-    # Handle Latest Mode
     if args.latest:
         sessions = discover_sessions(backend=backend, since_cutoff=since_cutoff, query=args.query)
         if not sessions:
             print("No sessions found to select latest from.", file=sys.stderr)
             sys.exit(1)
-        # discover_sessions returns sorted by mtime descending (and match rank)
         args.input_file = str(sessions[0]["path"])
         if not backend:
             backend = sessions[0].get("backend")
 
-    # Handle Input Resolution (File vs ID)
-    if args.input_file:
-        if not os.path.exists(args.input_file):
-            # Attempt ID resolution
-            # We scan for sessions and look for a match on session_id
-            target_id = args.input_file.strip()
-            
-            # If the user specified a specific horizon, respect it.
-            # If they didn't (default 1w), and the file isn't found, 
-            # arguably we should look wider? For now, sticking to explicit/default horizon 
-            # ensures "scan-per-run" performance is predictable.
-            
-            sessions = discover_sessions(backend=backend, since_cutoff=since_cutoff)
-            matches = []
-            for s in sessions:
-                sid = str(s.get("session_id", ""))
-                if sid == target_id:
-                    matches.append(s)
-                elif sid.startswith(target_id): # Prefix match
-                    matches.append(s)
-            
-            if len(matches) == 1:
-                args.input_file = str(matches[0]["path"])
-                if not backend:
-                    backend = matches[0].get("backend")
-            elif len(matches) > 1:
-                # Prioritize exact match
-                exact = [m for m in matches if str(m.get("session_id", "")) == target_id]
-                if len(exact) == 1:
-                    args.input_file = str(exact[0]["path"])
-                    if not backend:
-                        backend = exact[0].get("backend")
-                else:
-                    print(f"Error: Ambiguous ID '{target_id}'. Matched {len(matches)} sessions.", file=sys.stderr)
-                    sys.exit(1)
-            else:
-                print(f"Error: File not found and no session matched ID '{target_id}' (horizon: {since_label}).", file=sys.stderr)
-                sys.exit(1)
+    if args.id:
+        try:
+            matched = resolve_session_by_id(args.id, backend=backend, since_cutoff=since_cutoff)
+        except ValueError as exc:
+            print("Error: {0} (horizon: {1}).".format(exc, since_label), file=sys.stderr)
+            sys.exit(1)
+        args.input_file = str(matched["path"])
+        if not backend:
+            backend = matched.get("backend")
 
-    # Interactive Picker Fallback
     if not args.input_file:
         if sys.stdin.isatty():
+            # If backend is None, select_session will aggregate all
             args.input_file = select_session(
                 backend=backend,
                 since_cutoff=since_cutoff,
                 query=args.query,
                 since_label=since_label,
             )
+            # After selection, we must ensure we know the backend for parsing
             if not backend:
                 backend = infer_backend_from_path(args.input_file)
+                # Fallback if inference fails (unlikely for known paths)
+                if not backend:
+                    # Try to guess or error out? 
+                    # Actually, normalize_event needs a backend.
+                    # Let's assume standard paths for now or check file content type?
+                    # For now, inference is robust enough for standard paths.
+                    pass
         else:
             print("Error: no input file provided and not running interactively.", file=sys.stderr)
-            print("Hint: use `--list` or `--latest`, or run in a TTY.", file=sys.stderr)
+            print("Hint: use `--list`, `--latest`, or `--id`, or run in a TTY for interactive picker.", file=sys.stderr)
             sys.exit(1)
 
     if args.emit:

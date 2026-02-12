@@ -24,7 +24,7 @@ README_EXAMPLE_CASES = {
     "as-i-was-saying --head 2": "head",
     "as-i-was-saying --latest": "latest",
     "as-i-was-saying -l": "latest_short",
-    "as-i-was-saying 5a3b2c": "id_lookup",
+    "as-i-was-saying --id 5a3b2c": "id_lookup",
     "as-i-was-saying --query auth": "query_interactive",
     "as-i-was-saying --query auth --since 1d": "query_interactive_since",
     "as-i-was-saying --query auth --all-time": "query_interactive_all_time",
@@ -219,21 +219,10 @@ def test_readme_example_case_behaviors(command, case, monkeypatch, tmp_path, cap
     if case == "id_lookup":
         monkeypatch.setattr(
             app,
-            "discover_sessions",
-            lambda **_kwargs: [
-                {
-                    "path": str(claude),
-                    "session_id": "5a3b2c-full-id",
-                    "backend": "claude",
-                }
-            ],
+            "resolve_session_by_id",
+            lambda *_args, **_kwargs: {"path": str(claude), "backend": "claude"},
         )
-        
-        def fake_exists(path):
-            return str(path) != "5a3b2c"
-
-        monkeypatch.setattr(app.os.path, "exists", fake_exists)
-        assert _run_main(monkeypatch, ["5a3b2c"]) == 0
+        assert _run_main(monkeypatch, ["--id", "5a3b2c"]) == 0
         assert "# Transcript:" in capsys.readouterr().out
         return
 

@@ -61,16 +61,14 @@ as-i-was-saying -n 5
 as-i-was-saying --head 2
 ```
 
-**Quickly render the most recent session**
+**Quick Non-Interactive Selection**
 ```bash
+# Render the latest discovered session (respects --backend/--since/--all-time/--query)
 as-i-was-saying --latest
 as-i-was-saying -l
-```
 
-**Select by Session ID**
-If the input is not a file, it is treated as a session ID (exact or prefix match).
-```bash
-as-i-was-saying 5a3b2c
+# Render by known session id (exact or unique prefix)
+as-i-was-saying --id 5a3b2c
 ```
 
 **Session Discovery Search**
@@ -122,6 +120,7 @@ as-i-was-saying --backend gemini ~/.gemini/tmp/.../chats/session-...json
 ```
 
 If you pass a file path under `~/.codex/sessions`, `~/.claude/projects`, or `~/.gemini/tmp`, the tool will infer the backend automatically.
+The positional argument is always treated as a file path; use `--id` for session-id lookup.
 When running the interactive picker without `--backend`, the tool self-discovers which implemented backends are present on the system and skips missing ones.
 Interactive selection requires `fzf`. If unavailable, use `--list` for non-interactive discovery.
 
